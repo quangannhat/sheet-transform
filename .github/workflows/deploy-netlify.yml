@@ -30,8 +30,14 @@ jobs:
 
       - name: Deploy production (main)
         if: github.event_name != 'pull_request'
+        env:
+          NEXT_PUBLIC_BUILD_SHA: ${{ github.sha }}
+          NEXT_PUBLIC_BUILD_TIME: ${{ github.run_started_at }}
         run: npx --yes netlify-cli@latest deploy --build --prod
 
       - name: Deploy preview (pull request)
         if: github.event_name == 'pull_request'
+        env:
+          NEXT_PUBLIC_BUILD_SHA: ${{ github.sha }}
+          NEXT_PUBLIC_BUILD_TIME: ${{ github.run_started_at }}
         run: npx --yes netlify-cli@latest deploy --build --alias pr-${{ github.event.pull_request.number }}

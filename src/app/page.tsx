@@ -1,5 +1,8 @@
 import { SolidSkuGenerator } from "@/components/SolidSkuGenerator";
 
+const BUILD_SHA = (process.env.NEXT_PUBLIC_BUILD_SHA ?? "").slice(0, 7);
+const BUILD_TIME = process.env.NEXT_PUBLIC_BUILD_TIME ?? "";
+
 export default function Home() {
   return (
     <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-8 px-6 py-16">
@@ -15,6 +18,16 @@ export default function Home() {
         </p>
       </header>
       <SolidSkuGenerator />
+      <footer className="flex flex-wrap items-baseline gap-x-3 text-xs text-zinc-500">
+        <span className="rounded-full border border-zinc-300 px-2 py-0.5 font-medium text-zinc-600 dark:border-zinc-700 dark:text-zinc-400">
+          v3 &middot; LPN &amp; EAN written as text
+        </span>
+        <span aria-live="polite">
+          {BUILD_SHA
+            ? `deployed build ${BUILD_SHA}${BUILD_TIME ? ` · ${BUILD_TIME}` : ""}`
+            : "local dev build"}
+        </span>
+      </footer>
     </main>
   );
 }
