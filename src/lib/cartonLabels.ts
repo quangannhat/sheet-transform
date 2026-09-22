@@ -1,6 +1,8 @@
 import PDFDocument from "pdfkit";
 import bwip from "bwip-js";
 import { loadWorkbook, normHyphen } from "@/lib/solidSku";
+import { ARIAL_BOLD_TTF_BASE64 } from "@/lib/fonts/arialBold";
+import { ARIAL_REGULAR_TTF_BASE64 } from "@/lib/fonts/arialRegular";
 
 export type LabelRow = {
   lpn: string;
@@ -96,49 +98,108 @@ const PAGE_H = 420.9;
 type RenderedBarcode = {
   buffer: Buffer;
   widthPt: number;
+  heightPt: number;
 };
 
+/**
+ * Bars only (includetext off): this bwip-js build ignores textmargin and
+ * paints EAN guard bars through the digits, so captions are typeset with
+ * pdfkit directly under the image instead.
+ */
 async function renderBarcode(
   bcid: string,
   text: string,
   targetWidthPt: number,
   heightMm: number,
-  textsize: number,
 ): Promise<RenderedBarcode> {
   const widthMm = targetWidthPt / PT_PER_MM;
   const buffer = await bwip.toBuffer({
     bcid,
     text,
-    includetext: true,
-    textsize,
-    textmargin: 0.3,
     padding: 0,
     width: widthMm,
     height: heightMm,
   });
-  return { buffer, widthPt: targetWidthPt };
+  const pngW = buffer.readUInt32BE(16);
+  const pngH = buffer.readUInt32BE(20);
+  return {
+    buffer,
+    widthPt: targetWidthPt,
+    heightPt: (targetWidthPt * pngH) / pngW,
+  };
 }
 
 function cachedRenderer(
   bcid: string,
   widthPt: number,
   heightMm: number,
-  textsize: number,
 ): (text: string) => Promise<RenderedBarcode | null> {
   const cache = new Map<string, Promise<RenderedBarcode | null>>();
   return (text: string) => {
     let hit = cache.get(text);
     if (!hit) {
-      hit = renderBarcode(bcid, text, widthPt, heightMm, textsize).catch(
-        () => null,
-      );
+      hit = renderBarcode(bcid, text, widthPt, heightMm).catch(() => null);
       cache.set(text, hit);
     }
     return hit;
   };
 }
 
+function barcodeCaption(
+  doc: PDFKit.PDFDocument,
+  rb: RenderedBarcode,
+  x: number,
+  y: number,
+  digits: string,
+  size: number,
+  characterSpacing = 0,
+) {
+  doc
+    .font(ARIAL_REGULAR_FONT)
+    .fontSize(size)
+    .fillColor("#000000")
+    .text(digits, x, y + rb.heightPt + 1.5, {
+      width: rb.widthPt,
+      align: "center",
+      characterSpacing,
+      lineBreak: false,
+    });
+}
+
 type CenteredLine = { text: string; size: number };
+
+/** Arial (TTF embedded, see fonts/arialBold.ts) for all label text. */
+export const LABEL_FONT = "Arial-Bold";
+const ARIAL_REGULAR_FONT = "Arial-Regular";
+export const LABEL_FONT_SIZE = 26;
+
+/** Split lines that are too wide for the box into word-wrapped rows. */
+function wrapLines(
+  doc: PDFKit.PDFDocument,
+  lines: CenteredLine[],
+  w: number,
+): CenteredLine[] {
+  const out: CenteredLine[] = [];
+  for (const l of lines) {
+    if (!l.text) continue;
+    doc.font(LABEL_FONT).fontSize(l.size);
+    if (doc.widthOfString(l.text) <= w - 6) {
+      out.push(l);
+      continue;
+    }
+    let cur = "";
+    for (const word of l.text.split(/\s+/)) {
+      const cand = cur ? `${cur} ${word}` : word;
+      if (!cur || doc.widthOfString(cand) <= w - 6) cur = cand;
+      else {
+        out.push({ text: cur, size: l.size });
+        cur = word;
+      }
+    }
+    if (cur) out.push({ text: cur, size: l.size });
+  }
+  return out;
+}
 
 function boxLabel(
   doc: PDFKit.PDFDocument,
@@ -149,15 +210,16 @@ function boxLabel(
   lines: CenteredLine[],
 ) {
   doc.lineWidth(0.8).rect(x, y, w, h).stroke();
-  const nonEmpty = lines.filter((l) => l.text);
-  if (nonEmpty.length === 0) return;
-  const lineHeight = (s: number) => s * 1.35;
-  const total = nonEmpty.reduce((a, l) => a + lineHeight(l.size), 0);
+  const rows = wrapLines(doc, lines, w);
+  if (rows.length === 0) return;
+  const maxLh = (h - 4) / rows.length;
+  const lineHeight = (s: number) => Math.min(s * 1.35, maxLh);
+  const total = rows.reduce((a, l) => a + lineHeight(l.size), 0);
   let cy = y + (h - total) / 2;
   doc.fillColor("#000000");
-  for (const l of nonEmpty) {
+  for (const l of rows) {
     doc
-      .font("Helvetica-Bold")
+      .font(LABEL_FONT)
       .fontSize(l.size)
       .text(l.text, x, cy, { width: w, align: "center", lineBreak: false });
     cy += lineHeight(l.size);
@@ -168,9 +230,9 @@ export async function buildLabelsPdf(
   rows: LabelRow[],
   serialBase: number,
 ): Promise<Buffer> {
-  const renderSerial = cachedRenderer("code128", 200, 18, 11);
-  const renderPo = cachedRenderer("code128", 190, 16, 10);
-  const renderEan = cachedRenderer("ean13", 255, 15, 8);
+  const renderSerial = cachedRenderer("code128", 200, 18);
+  const renderPo = cachedRenderer("code128", 190, 16);
+  const renderEan = cachedRenderer("ean13", 255, 15);
 
   // pre-render everything so the doc build stays synchronous
   const serials = await Promise.all(
@@ -186,6 +248,14 @@ export async function buildLabelsPdf(
     margin: 0,
     autoFirstPage: false,
   });
+  doc.registerFont(
+    LABEL_FONT,
+    Buffer.from(ARIAL_BOLD_TTF_BASE64, "base64"),
+  );
+  doc.registerFont(
+    ARIAL_REGULAR_FONT,
+    Buffer.from(ARIAL_REGULAR_TTF_BASE64, "base64"),
+  );
   const chunks: Buffer[] = [];
   doc.on("data", (c: Buffer) => chunks.push(c));
   const done = new Promise<Buffer>((resolve, reject) => {
@@ -197,41 +267,55 @@ export async function buildLabelsPdf(
     doc.addPage({ size: [PAGE_W, PAGE_H], margin: 0 });
     doc.lineWidth(1).rect(2, 3, PAGE_W - 4, PAGE_H - 9).stroke();
 
+    const serial = cartonSerial(serialBase, i);
     const sb = serials[i];
     if (sb) {
-      doc.image(sb.buffer, (PAGE_W - sb.widthPt) / 2, 18, { width: sb.widthPt });
+      const sx = (PAGE_W - sb.widthPt) / 2;
+      doc.image(sb.buffer, sx, 18, { width: sb.widthPt });
+      barcodeCaption(doc, sb, sx, 18, serial, 11, 1.6);
     }
 
     boxLabel(doc, 30, 119, 300, 53, [
-      { text: `Order no:${r.po}`, size: 20 },
+      { text: `Order no:${r.po}`, size: LABEL_FONT_SIZE },
     ]);
     const pb = pos[i];
-    if (pb) doc.image(pb.buffer, 353, 112, { width: pb.widthPt });
+    if (pb) {
+      doc.image(pb.buffer, 353, 112, { width: pb.widthPt });
+      barcodeCaption(doc, pb, 353, 112, r.po, 10, 0.6);
+    }
 
     boxLabel(doc, 30, 211, 186, 66, [
-      { text: "Article no:", size: 20 },
-      { text: r.art, size: 20 },
+      { text: "Article no:", size: LABEL_FONT_SIZE },
+      { text: r.art, size: LABEL_FONT_SIZE },
     ]);
     boxLabel(doc, 224, 211, 129, 66, [
-      { text: "Color no:", size: 20 },
-      { text: r.col, size: 20 },
+      { text: "Color no:", size: LABEL_FONT_SIZE },
+      { text: r.col, size: LABEL_FONT_SIZE },
     ]);
     boxLabel(doc, 364, 211, 76, 66, [
-      { text: "Size:", size: 20 },
-      { text: r.size, size: 20 },
+      { text: "Size:", size: LABEL_FONT_SIZE },
+      { text: r.size, size: LABEL_FONT_SIZE },
     ]);
     boxLabel(doc, 450, 211, 129, 66, [
-      { text: "QTY/pcs:", size: 20 },
-      { text: r.qty, size: 20 },
+      { text: "QTY/pcs:", size: LABEL_FONT_SIZE },
+      { text: r.qty, size: LABEL_FONT_SIZE },
     ]);
 
     const eb = eans[i];
-    if (eb) doc.image(eb.buffer, 62, 300, { width: eb.widthPt });
+    if (eb) {
+      doc.image(eb.buffer, 62, 300, { width: eb.widthPt });
+      const eanDigits =
+        r.ean.length === 14 && r.ean.startsWith("0")
+          ? r.ean.slice(1)
+          : r.ean;
+      barcodeCaption(doc, eb, 62, 300, eanDigits, 9, 1.4);
+    }
 
-    boxLabel(doc, 450, 277, 130, 126, [
-      { text: "CARTON BOX", size: 16 },
-      { text: "NUMBER:", size: 16 },
-      { text: r.boxLabel, size: 22 },
+    // start 10pt below the QTY box's bottom border (277)
+    boxLabel(doc, 450, 287, 130, 116, [
+      { text: "CARTON BOX", size: LABEL_FONT_SIZE },
+      { text: "NUMBER:", size: LABEL_FONT_SIZE },
+      { text: r.boxLabel, size: LABEL_FONT_SIZE },
     ]);
   });
 
