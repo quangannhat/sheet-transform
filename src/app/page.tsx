@@ -15,12 +15,14 @@ export default function Home() {
           and the barcode file, and the server builds one Excel row per carton
           with the EAN lookup, LPN numbering and mixed-carton flags &mdash;
           exactly like <code className="rounded bg-zinc-100 px-1 py-0.5 text-[0.85em] dark:bg-zinc-800">solid_sku_gen.py</code>.
+          A carton-labels PDF (one A5 label sheet per carton) is generated as
+          the second step.
         </p>
       </header>
       <SolidSkuGenerator />
       <footer className="flex flex-wrap items-baseline gap-x-3 text-xs text-zinc-500">
         <span className="rounded-full border border-zinc-300 px-2 py-0.5 font-medium text-zinc-600 dark:border-zinc-700 dark:text-zinc-400">
-          v3 &middot; LPN &amp; EAN written as text
+          v4 &middot; + carton labels PDF step
         </span>
         <span aria-live="polite">
           {BUILD_SHA

@@ -2,72 +2,133 @@
 
 import { useRef, useState } from "react";
 
+const XLSX_MIME =
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+type GeneratedFile = { url: string; name: string };
+
 type Status =
   | { kind: "idle" }
   | { kind: "error"; messages: string[] }
   | {
       kind: "done";
-      fileName: string;
+      xlsx: GeneratedFile;
+      pdf?: GeneratedFile;
+      pdfError?: string;
       rowCount: number;
       mixedCount: number;
-      url: string;
     };
+
+function download(blobUrl: string, name: string) {
+  const a = document.createElement("a");
+  a.href = blobUrl;
+  a.download = name;
+  a.click();
+}
+
+function Errors({ messages }: { messages: string[] }) {
+  return (
+    <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">
+      <ul className="list-inside space-y-1 whitespace-pre-wrap">
+        {messages.map((m) => (
+          <li key={m}>{m}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+const fileInputClass =
+  "block w-full cursor-pointer rounded-lg border border-black/[.12] p-2 text-sm text-zinc-600 file:mr-3 file:rounded-md file:border-0 file:bg-zinc-900 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-white hover:file:bg-zinc-700 dark:border-white/[.145] dark:text-zinc-400 dark:file:bg-white dark:file:text-black";
+const labelClass =
+  "flex flex-col gap-1.5 text-sm font-medium text-zinc-700 dark:text-zinc-300";
+const cardClass =
+  "flex flex-col gap-4 rounded-xl border border-black/[.08] bg-white p-5 dark:border-white/[.145] dark:bg-black";
+const inputClass =
+  "rounded-lg border border-black/[.12] p-2 text-sm text-zinc-800 dark:border-white/[.145] dark:text-zinc-200";
+const buttonClass =
+  "h-11 shrink-0 self-start rounded-full bg-blue-600 px-8 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50";
+
+async function readErrors(res: Response): Promise<string[]> {
+  const body = (await res.json().catch(() => null)) as {
+    errors?: string[];
+  } | null;
+  return body?.errors ?? [`Request failed (${res.status})`];
+}
 
 export function SolidSkuGenerator() {
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const [pending, setPending] = useState(false);
-  const urlRef = useRef<string | null>(null);
+  const urlsRef = useRef<string[]>([]);
 
-  const revokeUrl = () => {
-    if (urlRef.current) {
-      URL.revokeObjectURL(urlRef.current);
-      urlRef.current = null;
-    }
+  const revokeAll = () => {
+    urlsRef.current.forEach((u) => URL.revokeObjectURL(u));
+    urlsRef.current = [];
   };
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
     const data = new FormData(form);
+    const serialBase = String(data.get("serialBase") ?? "").trim();
 
     setPending(true);
-    revokeUrl();
+    revokeAll();
     try {
       const res = await fetch("/api/solid-sku", { method: "POST", body: data });
-      const contentType = res.headers.get("content-type") ?? "";
-
-      if (!contentType.includes("spreadsheetml")) {
-        const body = (await res.json().catch(() => null)) as {
-          errors?: string[];
-        } | null;
-        setStatus({
-          kind: "error",
-          messages: body?.errors ?? [`Request failed (${res.status})`],
-        });
+      if (!(res.headers.get("content-type") ?? "").includes("spreadsheetml")) {
+        setStatus({ kind: "error", messages: await readErrors(res) });
         return;
       }
 
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      urlRef.current = url;
-      const disposition = res.headers.get("content-disposition") ?? "";
-      const utf8Match = /filename\*=UTF-8''([^;]+)/i.exec(disposition);
-      const fileName = utf8Match
-        ? decodeURIComponent(utf8Match[1])
-        : "SOLID_SKU_output.xlsx";
+      const xlsxName =
+        decodeURIComponent(
+          /filename\*=UTF-8''([^;]+)/i
+            .exec(res.headers.get("content-disposition") ?? "")?.[1] ?? "",
+        ) || "SOLID_SKU_output.xlsx";
+      const xlsxUrl = URL.createObjectURL(await res.blob());
+      urlsRef.current.push(xlsxUrl);
+      download(xlsxUrl, xlsxName);
 
-      setStatus({
-        kind: "done",
-        fileName,
-        url,
-        rowCount: Number(res.headers.get("x-row-count") ?? 0),
-        mixedCount: Number(res.headers.get("x-mixed-count") ?? 0),
+      // step 2: build the carton-labels PDF from the generated workbook
+      const pdfData = new FormData();
+      pdfData.set(
+        "file",
+        new File([await blobFromXlsx(xlsxUrl)], xlsxName, { type: XLSX_MIME }),
+      );
+      pdfData.set("serialBase", serialBase);
+      const pdfRes = await fetch("/api/solid-sku/labels", {
+        method: "POST",
+        body: pdfData,
       });
-
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = fileName;
-      a.click();
+      if (
+        (pdfRes.headers.get("content-type") ?? "").includes("application/pdf")
+      ) {
+        const pdfName =
+          decodeURIComponent(
+            /filename\*=UTF-8''([^;]+)/i
+              .exec(pdfRes.headers.get("content-disposition") ?? "")?.[1] ?? "",
+          ) || "SOLID_SKU labels.pdf";
+        const pdfUrl = URL.createObjectURL(await pdfRes.blob());
+        urlsRef.current.push(pdfUrl);
+        download(pdfUrl, pdfName);
+        setStatus({
+          kind: "done",
+          xlsx: { url: xlsxUrl, name: xlsxName },
+          pdf: { url: pdfUrl, name: pdfName },
+          rowCount: Number(pdfRes.headers.get("x-row-count") ?? 0),
+          mixedCount: Number(res.headers.get("x-mixed-count") ?? 0),
+        });
+      } else {
+        const errs = await readErrors(pdfRes);
+        setStatus({
+          kind: "done",
+          xlsx: { url: xlsxUrl, name: xlsxName },
+          pdfError: errs.join("\n"),
+          rowCount: Number(res.headers.get("x-row-count") ?? 0),
+          mixedCount: Number(res.headers.get("x-mixed-count") ?? 0),
+        });
+      }
     } catch {
       setStatus({ kind: "error", messages: ["Network request failed."] });
     } finally {
@@ -77,33 +138,34 @@ export function SolidSkuGenerator() {
 
   return (
     <div className="flex w-full flex-col gap-6">
-      <form onSubmit={onSubmit}
-        className="flex flex-col gap-4 rounded-xl border border-black/[.08] bg-white p-5 dark:border-white/[.145] dark:bg-black"
+      <form
+        onSubmit={onSubmit}
+        className={cardClass}
       >
-        <label className="flex flex-col gap-1.5 text-sm font-medium text-zinc-700 dark:text-zinc-300">
+        <label className={labelClass}>
           INV-PL file (must contain a &ldquo;PL&rdquo; sheet)
           <input
             type="file"
             name="plFile"
             accept=".xlsx,.xlsm"
             required
-            className="block w-full cursor-pointer rounded-lg border border-black/[.12] p-2 text-sm text-zinc-600 file:mr-3 file:rounded-md file:border-0 file:bg-zinc-900 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-white hover:file:bg-zinc-700 dark:border-white/[.145] dark:text-zinc-400 dark:file:bg-white dark:file:text-black"
+            className={fileInputClass}
           />
         </label>
 
-        <label className="flex flex-col gap-1.5 text-sm font-medium text-zinc-700 dark:text-zinc-300">
+        <label className={labelClass}>
           Barcode file (article / color / size &rarr; EAN)
           <input
             type="file"
             name="barcodeFile"
             accept=".xlsx,.xlsm"
             required
-            className="block w-full cursor-pointer rounded-lg border border-black/[.12] p-2 text-sm text-zinc-600 file:mr-3 file:rounded-md file:border-0 file:bg-zinc-900 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-white hover:file:bg-zinc-700 dark:border-white/[.145] dark:text-zinc-400 dark:file:bg-white dark:file:text-black"
+            className={fileInputClass}
           />
         </label>
 
         <div className="flex flex-col gap-4 sm:flex-row">
-          <label className="flex flex-1 flex-col gap-1.5 text-sm font-medium text-zinc-700 dark:text-zinc-300">
+          <label className={`flex-1 ${labelClass}`}>
             LPN start number
             <input
               type="text"
@@ -111,58 +173,164 @@ export function SolidSkuGenerator() {
               name="lpn"
               required
               placeholder="1"
-              className="rounded-lg border border-black/[.12] p-2 text-sm text-zinc-800 dark:border-white/[.145] dark:text-zinc-200"
+              className={inputClass}
             />
           </label>
-          <label className="flex flex-[2] flex-col gap-1.5 text-sm font-medium text-zinc-700 dark:text-zinc-300">
+          <label className={`flex-1 ${labelClass}`}>
+            Carton serial base (PDF barcodes)
+            <input
+              type="text"
+              inputMode="numeric"
+              name="serialBase"
+              placeholder="12471600000049"
+              className={inputClass}
+            />
+          </label>
+          <label className={`flex-[1.5] ${labelClass}`}>
             Output filename
             <input
               type="text"
               name="output"
               placeholder="SOLID_SKU_output.xlsx"
-              className="rounded-lg border border-black/[.12] p-2 text-sm text-zinc-800 dark:border-white/[.145] dark:text-zinc-200"
+              className={inputClass}
             />
           </label>
         </div>
 
-        <button
-          type="submit"
-          disabled={pending}
-          className="h-11 shrink-0 self-start rounded-full bg-blue-600 px-8 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-        >
+        <button type="submit" disabled={pending} className={buttonClass}>
           {pending ? "Working…" : "Generate →"}
         </button>
       </form>
 
-      {status.kind === "error" && (
-        <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">
-          <ul className="list-inside space-y-1 whitespace-pre-wrap">
-            {status.messages.map((m) => (
-              <li key={m}>{m}</li>
-            ))}
-          </ul>
-        </div>
-      )}
+      {status.kind === "error" && <Errors messages={status.messages} />}
 
       {status.kind === "done" && (
         <div className="flex flex-col gap-2 rounded-lg bg-green-50 px-4 py-3 text-sm text-green-800 dark:bg-green-950/40 dark:text-green-300">
           <p>
             &#10003; {status.rowCount} rows &middot; {status.mixedCount} mixed
             &middot; saved to{" "}
-            <span className="font-medium">{status.fileName}</span>
+            <span className="font-medium">{status.xlsx.name}</span>
           </p>
+          {status.pdf && (
+            <p>
+              &#10003; carton labels PDF ({status.pdf.name})
+            </p>
+          )}
+          {status.pdfError && (
+            <p className="text-red-600 dark:text-red-400">
+              &#10007; PDF step failed: {status.pdfError}
+            </p>
+          )}
           <p className="text-green-700 dark:text-green-400">
-            Download didn&rsquo;t start?{" "}
+            Downloads didn&rsquo;t start?{" "}
             <a
-              href={status.url}
-              download={status.fileName}
+              href={status.xlsx.url}
+              download={status.xlsx.name}
               className="underline underline-offset-2"
             >
-              Download {status.fileName}
+              {status.xlsx.name}
             </a>
+            {status.pdf && (
+              <>
+                {" · "}
+                <a
+                  href={status.pdf.url}
+                  download={status.pdf.name}
+                  className="underline underline-offset-2"
+                >
+                  {status.pdf.name}
+                </a>
+              </>
+            )}
           </p>
         </div>
       )}
+
+      <LabelsPdfCard />
     </div>
+  );
+}
+
+async function blobFromXlsx(url: string): Promise<Blob> {
+  const res = await fetch(url);
+  return res.blob();
+}
+
+function LabelsPdfCard() {
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string[] | null>(null);
+  const [done, setDone] = useState<GeneratedFile | null>(null);
+
+  async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPending(true);
+    setError(null);
+    setDone(null);
+    try {
+      const res = await fetch("/api/solid-sku/labels", {
+        method: "POST",
+        body: new FormData(event.currentTarget),
+      });
+      if (!(res.headers.get("content-type") ?? "").includes("application/pdf")) {
+        setError(await readErrors(res));
+        return;
+      }
+      const name =
+        decodeURIComponent(
+          /filename\*=UTF-8''([^;]+)/i
+            .exec(res.headers.get("content-disposition") ?? "")?.[1] ?? "",
+        ) || "carton labels.pdf";
+      const url = URL.createObjectURL(await res.blob());
+      download(url, name);
+      setDone({ url, name });
+    } catch {
+      setError(["Network request failed."]);
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <form onSubmit={onSubmit} className={cardClass}>
+      <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
+        Carton labels PDF from an existing SOLID SKU file
+      </h2>
+      <label className={labelClass}>
+        SOLID SKU workbook (generated output)
+        <input
+          type="file"
+          name="file"
+          accept=".xlsx,.xlsm"
+          required
+          className={fileInputClass}
+        />
+      </label>
+      <label className={`sm:max-w-xs ${labelClass}`}>
+        Carton serial base (optional)
+        <input
+          type="text"
+          inputMode="numeric"
+          name="serialBase"
+          placeholder="12471600000049"
+          className={inputClass}
+        />
+      </label>
+      <button type="submit" disabled={pending} className={buttonClass}>
+        {pending ? "Working…" : "Download labels PDF →"}
+      </button>
+      {error && <Errors messages={error} />}
+      {done && (
+        <p className="text-sm text-green-700 dark:text-green-400">
+          &#10003; {done.name} downloaded — didn&rsquo;t start?{" "}
+          <a
+            href={done.url}
+            download={done.name}
+            className="underline underline-offset-2"
+          >
+            {done.name}
+          </a>
+        </p>
+      )}
+    </form>
   );
 }

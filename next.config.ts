@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ["exceljs"],
+  serverExternalPackages: ["exceljs", "pdfkit", "bwip-js"],
   experimental: {
     serverActions: {
       bodySizeLimit: "10mb",
