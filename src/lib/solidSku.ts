@@ -319,7 +319,7 @@ export async function writeOutput(
       r.col,
       r.size,
       r.qty ? String(r.qty) : null,
-      bc ?? null,
+      bc === undefined ? null : String(bc),
       `${r.box}/${tc}`,
     ]);
     const font = r.mixed
