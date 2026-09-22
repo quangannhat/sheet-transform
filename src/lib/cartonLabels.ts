@@ -272,7 +272,7 @@ export async function buildLabelsPdf(
     if (sb) {
       const sx = (PAGE_W - sb.widthPt) / 2;
       doc.image(sb.buffer, sx, 18, { width: sb.widthPt });
-      barcodeCaption(doc, sb, sx, 18, serial, 11, 1.6);
+      barcodeCaption(doc, sb, sx, 18, serial, 13, 1.8);
     }
 
     boxLabel(doc, 30, 119, 300, 53, [
@@ -281,7 +281,7 @@ export async function buildLabelsPdf(
     const pb = pos[i];
     if (pb) {
       doc.image(pb.buffer, 353, 112, { width: pb.widthPt });
-      barcodeCaption(doc, pb, 353, 112, r.po, 10, 0.6);
+      barcodeCaption(doc, pb, 353, 112, r.po, 12, 0.8);
     }
 
     boxLabel(doc, 30, 211, 186, 66, [
@@ -308,14 +308,14 @@ export async function buildLabelsPdf(
         r.ean.length === 14 && r.ean.startsWith("0")
           ? r.ean.slice(1)
           : r.ean;
-      barcodeCaption(doc, eb, 62, 300, eanDigits, 9, 1.4);
+      barcodeCaption(doc, eb, 62, 300, eanDigits, 11, 1.8);
     }
 
     // start 10pt below the QTY box's bottom border (277)
     boxLabel(doc, 450, 287, 130, 116, [
-      { text: "CARTON BOX", size: LABEL_FONT_SIZE },
-      { text: "NUMBER:", size: LABEL_FONT_SIZE },
-      { text: r.boxLabel, size: LABEL_FONT_SIZE },
+      { text: "CARTON BOX", size: 17 },
+      { text: "NUMBER:", size: 17 },
+      { text: r.boxLabel, size: 22 },
     ]);
   });
 
