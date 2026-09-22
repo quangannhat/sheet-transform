@@ -312,7 +312,7 @@ export async function writeOutput(
       ? undefined
       : getBarcode(barcodes, r.artBare, r.colRaw, r.size ?? "");
     const row = ws.addRow([
-      lpn,
+      String(lpn),
       po,
       po,
       r.art,
