@@ -22,7 +22,7 @@ export default function Home() {
       <SolidSkuGenerator />
       <footer className="flex flex-wrap items-baseline gap-x-3 text-xs text-zinc-500">
         <span className="rounded-full border border-zinc-300 px-2 py-0.5 font-medium text-zinc-600 dark:border-zinc-700 dark:text-zinc-400">
-          v4 &middot; + carton labels PDF step
+          v5 &middot; carton labels match sample layout
         </span>
         <span aria-live="polite">
           {BUILD_SHA
