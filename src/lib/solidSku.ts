@@ -5,10 +5,9 @@ export type PlRecord = {
   artBare: string;
   col: string;
   colRaw: string;
-  size: string | null;
-  qty: number | null;
+  size: string;
+  qty: number;
   box: number;
-  mixed: boolean;
 };
 
 export type GenerateResult = {
@@ -103,7 +102,13 @@ function findDataStart(rows: Cell[][]): number {
   throw new Error("Could not find 'From'/'To' header in PL sheet");
 }
 
-const KNOWN_SIZES = ["XXS", "XS", "S", "M", "L", "XL", "XXL", "XXXL"];
+export const KNOWN_SIZES = ["XXS", "XS", "S", "M", "L", "XL", "XXL", "XXXL"];
+
+/** PL header order for sizing columns on the mixed-carton sticker table. */
+export function sizeRank(size: string): number {
+  const i = KNOWN_SIZES.indexOf(size.toUpperCase());
+  return i === -1 ? KNOWN_SIZES.length : i;
+}
 
 /** {size: 0-based column index}, ordered as they appear in the header row */
 function detectSizeColumns(headerRow: Cell[] | undefined): Array<[string, number]> {
@@ -226,8 +231,9 @@ export async function parsePl(
     const colStr = color ? String(color).trim().split(/\s+/)[0] : "";
 
     for (let box = boxFromI; box <= boxTo; box += 1) {
-      if (filled.length === 1) {
-        const { size, qty } = filled[0];
+      // A mixed carton becomes one row per polybag (article/size cell);
+      // a solid carton has exactly one cell, so it stays one row.
+      for (const { size, qty } of filled) {
         records.push({
           art,
           artBare,
@@ -236,18 +242,6 @@ export async function parsePl(
           size,
           qty,
           box,
-          mixed: false,
-        });
-      } else {
-        records.push({
-          art,
-          artBare,
-          col: colStr,
-          colRaw: color ? String(color) : "",
-          size: null,
-          qty: null,
-          box,
-          mixed: true,
         });
       }
     }
@@ -308,9 +302,7 @@ export async function writeOutput(
   let lpn = lpnStart;
 
   for (const r of records) {
-    const bc = r.mixed
-      ? undefined
-      : getBarcode(barcodes, r.artBare, r.colRaw, r.size ?? "");
+    const bc = getBarcode(barcodes, r.artBare, r.colRaw, r.size);
     const row = ws.addRow([
       String(lpn),
       po,
@@ -318,24 +310,16 @@ export async function writeOutput(
       r.art,
       r.col,
       r.size,
-      r.qty ? String(r.qty) : null,
+      String(r.qty),
       bc === undefined ? null : String(bc),
       `${r.box}/${tc}`,
     ]);
-    const font = r.mixed
-      ? { name: "Arial", size: 10, color: { argb: "FFFF0000" } }
-      : { name: "Arial", size: 10 };
+    const font = { name: "Arial", size: 10 };
     for (let c = 1; c <= 9; c += 1) {
       const cell = row.getCell(c);
       cell.font = font;
       cell.alignment = center;
       cell.border = cellBorder;
-    }
-    if (r.mixed) {
-      const cell = row.getCell(10);
-      cell.value = "THÙNG MIX";
-      cell.font = font;
-      cell.alignment = center;
     }
     lpn += 1;
   }
@@ -357,12 +341,20 @@ export async function generate(
   const barcodes = await buildBarcodeMap(barcodeBuffer);
   const { records, totalCartons, po } = await parsePl(plBuffer);
   const buffer = await writeOutput(records, barcodes, totalCartons, po, lpnStart);
+  const boxCounts = new Map<number, number>();
+  for (const r of records) {
+    boxCounts.set(r.box, (boxCounts.get(r.box) ?? 0) + 1);
+  }
+  let mixedCartons = 0;
+  for (const n of boxCounts.values()) {
+    if (n > 1) mixedCartons += 1;
+  }
   return {
     buffer,
     po,
     totalCartons,
     rowCount: records.length,
-    mixedCount: records.filter((r) => r.mixed).length,
+    mixedCount: mixedCartons,
   };
 }
 

@@ -208,7 +208,7 @@ export function SolidSkuGenerator() {
         <div className="flex flex-col gap-2 rounded-lg bg-green-50 px-4 py-3 text-sm text-green-800 dark:bg-green-950/40 dark:text-green-300">
           <p>
             &#10003; {status.rowCount} rows &middot; {status.mixedCount} mixed
-            &middot; saved to{" "}
+            cartons &middot; saved to{" "}
             <span className="font-medium">{status.xlsx.name}</span>
           </p>
           {status.pdf && (

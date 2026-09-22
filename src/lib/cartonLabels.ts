@@ -1,6 +1,6 @@
 import PDFDocument from "pdfkit";
 import bwip from "bwip-js";
-import { loadWorkbook, normHyphen } from "@/lib/solidSku";
+import { loadWorkbook, normHyphen, sizeRank } from "@/lib/solidSku";
 import { ARIAL_BOLD_TTF_BASE64 } from "@/lib/fonts/arialBold";
 import { ARIAL_REGULAR_TTF_BASE64 } from "@/lib/fonts/arialRegular";
 
@@ -13,7 +13,6 @@ export type LabelRow = {
   qty: string;
   ean: string;
   boxLabel: string;
-  mixed: boolean;
 };
 
 export const DEFAULT_SERIAL_BASE = "12471600000049";
@@ -33,7 +32,7 @@ export function cartonLabelFileName(sourceName: string): string {
   return `${base} labels.pdf`;
 }
 
-/** Serial numbers in the sample: 12471600000050, ...51, ...62 = base + row index */
+/** Serial numbers in the sample: 12471600000050, ...51, ...62 = base + solid-carton index (mixed cartons take no LPN sticker serial) */
 export function cartonSerial(serialBase: number, rowIndex: number): string {
   return String(serialBase + rowIndex + 1);
 }
@@ -83,7 +82,6 @@ export async function parseSolidSkuRows(fileBuffer: Buffer): Promise<LabelRow[]>
       qty: cellText(row.getCell(7).value).trim(),
       ean,
       boxLabel: cellText(row.getCell(9).value).trim(),
-      mixed: !size && !ean,
     });
   });
 
@@ -226,21 +224,222 @@ function boxLabel(
   }
 }
 
+/** A carton is one page; >1 rows (polybags) makes it a mixed carton. */
+type CartonGroup = {
+  boxLabel: string;
+  rows: LabelRow[];
+  mixed: boolean;
+};
+
+function groupCartons(rows: LabelRow[]): CartonGroup[] {
+  const out: CartonGroup[] = [];
+  for (const r of rows) {
+    const last = out[out.length - 1];
+    if (last && last.boxLabel === r.boxLabel) last.rows.push(r);
+    else out.push({ boxLabel: r.boxLabel, rows: [r], mixed: false });
+  }
+  for (const g of out) g.mixed = g.rows.length > 1;
+  return out;
+}
+
+/**
+ * Shrink text from LABEL_FONT_SIZE until it word-wraps into the cell.
+ * widthOfString only honours the size set via doc.fontSize().
+ */
+function fitCellText(
+  doc: PDFKit.PDFDocument,
+  text: string,
+  w: number,
+  h: number,
+): { size: number; lines: string[] } | null {
+  if (!text) return null;
+  const usableW = w - 4;
+  const usableH = h - 4;
+  let size = LABEL_FONT_SIZE;
+  for (;;) {
+    doc.fontSize(size);
+    const lines: string[] = [];
+    let cur = "";
+    let overflow = false;
+    for (const word of text.split(/\s+/)) {
+      if (doc.widthOfString(word) > usableW) {
+        overflow = true;
+        break;
+      }
+      const cand = cur ? `${cur} ${word}` : word;
+      if (doc.widthOfString(cand) <= usableW) cur = cand;
+      else {
+        lines.push(cur);
+        cur = word;
+      }
+    }
+    if (cur) lines.push(cur);
+    if (!overflow && lines.length * size * 1.25 <= usableH) {
+      return { size, lines };
+    }
+    if (size <= 6) return overflow ? null : { size, lines };
+    size = Math.max(6, size - 2);
+  }
+}
+
+function tableCell(
+  doc: PDFKit.PDFDocument,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  text: string,
+) {
+  doc.lineWidth(0.8).rect(x, y, w, h).stroke();
+  doc.font(LABEL_FONT);
+  const lay = fitCellText(doc, text, w, h);
+  if (!lay) return;
+  const lh = lay.size * 1.25;
+  let cy = y + (h - lay.lines.length * lh) / 2;
+  doc.fillColor("#000000");
+  for (const ln of lay.lines) {
+    doc
+      .font(LABEL_FONT)
+      .fontSize(lay.size)
+      .text(ln, x, cy, { width: w, align: "center", lineBreak: false });
+    cy += lh;
+  }
+}
+
+/**
+ * "Mixed SKU carton version 2" sticker: Order no + PO barcode + BOX CARTON
+ * NUMBER header, then one row per (article, color) and one column per size
+ * with polybag counts. Intentionally carries no LPN (LPN goes on the
+ * polybags, i.e. the per-size rows of the SOLID SKU sheet).
+ */
+function drawMixedSticker(
+  doc: PDFKit.PDFDocument,
+  g: CartonGroup,
+  poBarcode: RenderedBarcode | null,
+) {
+  const r0 = g.rows[0];
+  doc.lineWidth(1).rect(2, 3, PAGE_W - 4, PAGE_H - 9).stroke();
+
+  boxLabel(doc, 24, 112, 236, 62, [
+    { text: `Order no:${r0.po}`, size: LABEL_FONT_SIZE },
+  ]);
+  if (poBarcode) {
+    doc.image(poBarcode.buffer, 270, 112, { width: poBarcode.widthPt });
+    barcodeCaption(doc, poBarcode, 270, 112, r0.po, 12, 0.8);
+  }
+  boxLabel(doc, 468, 112, 103, 62, [
+    { text: "BOX CARTON", size: 15 },
+    { text: "NUMBER:", size: 15 },
+    { text: r0.boxLabel, size: 22 },
+  ]);
+
+  type ArticleRow = {
+    art: string;
+    col: string;
+    qtys: Map<string, string>;
+    polybags: number;
+  };
+  const byArt = new Map<string, ArticleRow>();
+  const sizeSet = new Set<string>();
+  for (const r of g.rows) {
+    sizeSet.add(r.size);
+    const key = `${r.art}\u0000${r.col}`;
+    let a = byArt.get(key);
+    if (!a) {
+      a = { art: r.art, col: r.col, qtys: new Map(), polybags: 0 };
+      byArt.set(key, a);
+    }
+    if (!a.qtys.has(r.size)) {
+      a.qtys.set(r.size, r.qty);
+      a.polybags += 1;
+    }
+  }
+  const sizes = [...sizeSet].sort(
+    (a, b) => sizeRank(a) - sizeRank(b) || a.localeCompare(b),
+  );
+  const articles = [...byArt.values()];
+
+  const x0 = 24;
+  const wArt = 96;
+  const wCol = 96;
+  const wPoly = 62;
+  const wTot = 74;
+  const wSize =
+    (PAGE_W - 2 * x0 - 4 - wArt - wCol - wPoly - wTot) /
+    Math.max(sizes.length, 1);
+  const yTop = 190;
+  const yBot = PAGE_H - 20;
+  const rowH = (yBot - yTop) / (articles.length + 2);
+
+  let x = x0;
+  tableCell(doc, x, yTop, wArt, rowH, "");
+  x += wArt;
+  tableCell(doc, x, yTop, wCol, rowH, "Size:");
+  x += wCol;
+  for (const s of sizes) {
+    tableCell(doc, x, yTop, wSize, rowH, s);
+    x += wSize;
+  }
+  tableCell(doc, x, yTop, wPoly, rowH, "Polybags");
+  x += wPoly;
+  const totalX = x;
+  tableCell(doc, totalX, yTop, wTot, rowH, "Total Polybags");
+
+  const y1 = yTop + rowH;
+  x = x0 + wArt + wCol;
+  tableCell(doc, x0, y1, wArt, rowH, "Article no:");
+  tableCell(doc, x0 + wArt, y1, wCol, rowH, "Color no:");
+  for (let i = 0; i < sizes.length; i += 1) {
+    tableCell(doc, x, y1, wSize, rowH, "");
+    x += wSize;
+  }
+  tableCell(doc, x, y1, wPoly, rowH, "");
+  const totalPolybags = articles.reduce((a, b) => a + b.polybags, 0);
+  tableCell(doc, totalX, y1, wTot, yBot - y1, String(totalPolybags));
+
+  articles.forEach((a, i) => {
+    const y = yTop + (i + 2) * rowH;
+    x = x0 + wArt + wCol;
+    tableCell(doc, x0, y, wArt, rowH, a.art);
+    tableCell(doc, x0 + wArt, y, wCol, rowH, a.col);
+    for (const s of sizes) {
+      tableCell(doc, x, y, wSize, rowH, a.qtys.get(s) ?? "");
+      x += wSize;
+    }
+    tableCell(doc, x, y, wPoly, rowH, String(a.polybags));
+  });
+}
+
 export async function buildLabelsPdf(
   rows: LabelRow[],
   serialBase: number,
 ): Promise<Buffer> {
+  const cartons = groupCartons(rows);
   const renderSerial = cachedRenderer("code128", 200, 18);
   const renderPo = cachedRenderer("code128", 190, 16);
   const renderEan = cachedRenderer("ean13", 255, 15);
 
+  // LPN sticker serials are consumed by solid cartons only
+  let solidIdx = 0;
+  const serialTexts = cartons.map((g) =>
+    g.mixed ? null : cartonSerial(serialBase, solidIdx++),
+  );
+
   // pre-render everything so the doc build stays synchronous
   const serials = await Promise.all(
-    rows.map((_, i) => renderSerial(cartonSerial(serialBase, i))),
+    cartons.map((_, i) =>
+      serialTexts[i] === null
+        ? Promise.resolve(null)
+        : renderSerial(serialTexts[i] as string),
+    ),
   );
-  const pos = await Promise.all(rows.map((r) => renderPo(r.po)));
+  const pos = await Promise.all(cartons.map((g) => renderPo(g.rows[0].po)));
   const eans = await Promise.all(
-    rows.map((r) => (r.mixed || !r.ean ? Promise.resolve(null) : renderEan(r.ean))),
+    cartons.map((g) =>
+      g.mixed || !g.rows[0].ean
+        ? Promise.resolve(null)
+        : renderEan(g.rows[0].ean),
+    ),
   );
 
   const doc = new PDFDocument({
@@ -263,13 +462,18 @@ export async function buildLabelsPdf(
     doc.on("error", reject);
   });
 
-  rows.forEach((r, i) => {
+  cartons.forEach((g, i) => {
     doc.addPage({ size: [PAGE_W, PAGE_H], margin: 0 });
+    if (g.mixed) {
+      drawMixedSticker(doc, g, pos[i]);
+      return;
+    }
+    const r = g.rows[0];
     doc.lineWidth(1).rect(2, 3, PAGE_W - 4, PAGE_H - 9).stroke();
 
-    const serial = cartonSerial(serialBase, i);
+    const serial = serialTexts[i];
     const sb = serials[i];
-    if (sb) {
+    if (sb && serial !== null) {
       const sx = (PAGE_W - sb.widthPt) / 2;
       doc.image(sb.buffer, sx, 18, { width: sb.widthPt });
       barcodeCaption(doc, sb, sx, 18, serial, 13, 1.8);
