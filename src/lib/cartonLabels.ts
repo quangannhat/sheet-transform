@@ -1,6 +1,11 @@
 import PDFDocument from "pdfkit";
 import bwip from "bwip-js";
-import { loadWorkbook, normHyphen, sizeRank } from "@/lib/solidSku";
+import {
+  KNOWN_SIZES,
+  loadWorkbook,
+  normHyphen,
+  sizeRank,
+} from "@/lib/solidSku";
 import { ARIAL_BOLD_TTF_BASE64 } from "@/lib/fonts/arialBold";
 import { ARIAL_REGULAR_TTF_BASE64 } from "@/lib/fonts/arialRegular";
 
@@ -229,15 +234,23 @@ type CartonGroup = {
   boxLabel: string;
   rows: LabelRow[];
   mixed: boolean;
+  /** index of the carton's first row in the sheet (keeps LPN/serial aligned) */
+  firstRowIndex: number;
 };
 
 function groupCartons(rows: LabelRow[]): CartonGroup[] {
   const out: CartonGroup[] = [];
-  for (const r of rows) {
+  rows.forEach((r, idx) => {
     const last = out[out.length - 1];
     if (last && last.boxLabel === r.boxLabel) last.rows.push(r);
-    else out.push({ boxLabel: r.boxLabel, rows: [r], mixed: false });
-  }
+    else
+      out.push({
+        boxLabel: r.boxLabel,
+        rows: [r],
+        mixed: false,
+        firstRowIndex: idx,
+      });
+  });
   for (const g of out) g.mixed = g.rows.length > 1;
   return out;
 }
@@ -251,11 +264,12 @@ function fitCellText(
   text: string,
   w: number,
   h: number,
+  startSize: number,
 ): { size: number; lines: string[] } | null {
   if (!text) return null;
   const usableW = w - 4;
   const usableH = h - 4;
-  let size = LABEL_FONT_SIZE;
+  let size = startSize;
   for (;;) {
     doc.fontSize(size);
     const lines: string[] = [];
@@ -289,10 +303,11 @@ function tableCell(
   w: number,
   h: number,
   text: string,
+  startSize = LABEL_FONT_SIZE,
 ) {
   doc.lineWidth(0.8).rect(x, y, w, h).stroke();
   doc.font(LABEL_FONT);
-  const lay = fitCellText(doc, text, w, h);
+  const lay = fitCellText(doc, text, w, h, startSize);
   if (!lay) return;
   const lh = lay.size * 1.25;
   let cy = y + (h - lay.lines.length * lh) / 2;
@@ -306,11 +321,15 @@ function tableCell(
   }
 }
 
+/** Base size for table cells that are not one of the Polybags columns. */
+const TABLE_FONT_SIZE = 14;
+
 /**
  * "Mixed SKU carton version 2" sticker: Order no + PO barcode + BOX CARTON
- * NUMBER header, then one row per (article, color) and one column per size
- * with polybag counts. Intentionally carries no LPN (LPN goes on the
- * polybags, i.e. the per-size rows of the SOLID SKU sheet).
+ * NUMBER header, then one row per (article, color) and a fixed column per
+ * size (XXS..XXXL, empty when absent) with polybag counts. Intentionally
+ * carries no LPN (LPN goes on the polybags, i.e. the per-size rows of the
+ * SOLID SKU sheet).
  */
 function drawMixedSticker(
   doc: PDFKit.PDFDocument,
@@ -320,16 +339,16 @@ function drawMixedSticker(
   const r0 = g.rows[0];
   doc.lineWidth(1).rect(2, 3, PAGE_W - 4, PAGE_H - 9).stroke();
 
-  boxLabel(doc, 24, 112, 236, 62, [
+  boxLabel(doc, 24, 28, 236, 76, [
     { text: `Order no:${r0.po}`, size: LABEL_FONT_SIZE },
   ]);
   if (poBarcode) {
-    doc.image(poBarcode.buffer, 270, 112, { width: poBarcode.widthPt });
-    barcodeCaption(doc, poBarcode, 270, 112, r0.po, 12, 0.8);
+    doc.image(poBarcode.buffer, 270, 34, { width: poBarcode.widthPt });
+    barcodeCaption(doc, poBarcode, 270, 34, r0.po, 12, 0.8);
   }
-  boxLabel(doc, 468, 112, 103, 62, [
-    { text: "BOX CARTON", size: 15 },
-    { text: "NUMBER:", size: 15 },
+  boxLabel(doc, 464, 28, 107, 76, [
+    { text: "BOX CARTON", size: 14 },
+    { text: "NUMBER:", size: 14 },
     { text: r0.boxLabel, size: 22 },
   ]);
 
@@ -340,9 +359,9 @@ function drawMixedSticker(
     polybags: number;
   };
   const byArt = new Map<string, ArticleRow>();
-  const sizeSet = new Set<string>();
+  const present = new Set<string>();
   for (const r of g.rows) {
-    sizeSet.add(r.size);
+    present.add(r.size);
     const key = `${r.art}\u0000${r.col}`;
     let a = byArt.get(key);
     if (!a) {
@@ -354,30 +373,33 @@ function drawMixedSticker(
       a.polybags += 1;
     }
   }
-  const sizes = [...sizeSet].sort(
-    (a, b) => sizeRank(a) - sizeRank(b) || a.localeCompare(b),
-  );
+  // fixed size columns in PL order, plus any unexpected sizes after them
+  const sizes = [
+    ...KNOWN_SIZES,
+    ...[...present]
+      .filter((s) => !KNOWN_SIZES.includes(s.toUpperCase()))
+      .sort((a, b) => sizeRank(a) - sizeRank(b) || a.localeCompare(b)),
+  ];
   const articles = [...byArt.values()];
 
   const x0 = 24;
-  const wArt = 96;
-  const wCol = 96;
-  const wPoly = 62;
-  const wTot = 74;
+  const wArt = 70;
+  const wCol = 76;
+  const wPoly = 66;
+  const wTot = 78;
   const wSize =
-    (PAGE_W - 2 * x0 - 4 - wArt - wCol - wPoly - wTot) /
-    Math.max(sizes.length, 1);
-  const yTop = 190;
-  const yBot = PAGE_H - 20;
+    (PAGE_W - 2 * x0 - 4 - wArt - wCol - wPoly - wTot) / sizes.length;
+  const yTop = 116;
+  const yBot = PAGE_H - 16;
   const rowH = (yBot - yTop) / (articles.length + 2);
 
   let x = x0;
-  tableCell(doc, x, yTop, wArt, rowH, "");
+  tableCell(doc, x, yTop, wArt, rowH, "", TABLE_FONT_SIZE);
   x += wArt;
-  tableCell(doc, x, yTop, wCol, rowH, "Size:");
+  tableCell(doc, x, yTop, wCol, rowH, "Size:", TABLE_FONT_SIZE);
   x += wCol;
   for (const s of sizes) {
-    tableCell(doc, x, yTop, wSize, rowH, s);
+    tableCell(doc, x, yTop, wSize, rowH, s, TABLE_FONT_SIZE);
     x += wSize;
   }
   tableCell(doc, x, yTop, wPoly, rowH, "Polybags");
@@ -387,23 +409,23 @@ function drawMixedSticker(
 
   const y1 = yTop + rowH;
   x = x0 + wArt + wCol;
-  tableCell(doc, x0, y1, wArt, rowH, "Article no:");
-  tableCell(doc, x0 + wArt, y1, wCol, rowH, "Color no:");
+  tableCell(doc, x0, y1, wArt, rowH, "Article no:", TABLE_FONT_SIZE);
+  tableCell(doc, x0 + wArt, y1, wCol, rowH, "Color no:", TABLE_FONT_SIZE);
   for (let i = 0; i < sizes.length; i += 1) {
-    tableCell(doc, x, y1, wSize, rowH, "");
+    tableCell(doc, x, y1, wSize, rowH, "", TABLE_FONT_SIZE);
     x += wSize;
   }
-  tableCell(doc, x, y1, wPoly, rowH, "");
+  tableCell(doc, x, y1, wPoly, rowH, "", TABLE_FONT_SIZE);
   const totalPolybags = articles.reduce((a, b) => a + b.polybags, 0);
   tableCell(doc, totalX, y1, wTot, yBot - y1, String(totalPolybags));
 
   articles.forEach((a, i) => {
     const y = yTop + (i + 2) * rowH;
     x = x0 + wArt + wCol;
-    tableCell(doc, x0, y, wArt, rowH, a.art);
-    tableCell(doc, x0 + wArt, y, wCol, rowH, a.col);
+    tableCell(doc, x0, y, wArt, rowH, a.art, TABLE_FONT_SIZE);
+    tableCell(doc, x0 + wArt, y, wCol, rowH, a.col, TABLE_FONT_SIZE);
     for (const s of sizes) {
-      tableCell(doc, x, y, wSize, rowH, a.qtys.get(s) ?? "");
+      tableCell(doc, x, y, wSize, rowH, a.qtys.get(s) ?? "", TABLE_FONT_SIZE);
       x += wSize;
     }
     tableCell(doc, x, y, wPoly, rowH, String(a.polybags));
@@ -419,10 +441,11 @@ export async function buildLabelsPdf(
   const renderPo = cachedRenderer("code128", 190, 16);
   const renderEan = cachedRenderer("ean13", 255, 15);
 
-  // LPN sticker serials are consumed by solid cartons only
-  let solidIdx = 0;
+  // serials follow the carton's first sheet row, so a solid carton's sticker
+  // serial always carries the same index as its LPN in the workbook; mixed
+  // cartons take no LPN sticker at all
   const serialTexts = cartons.map((g) =>
-    g.mixed ? null : cartonSerial(serialBase, solidIdx++),
+    g.mixed ? null : cartonSerial(serialBase, g.firstRowIndex),
   );
 
   // pre-render everything so the doc build stays synchronous
