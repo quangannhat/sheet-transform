@@ -387,13 +387,14 @@ function drawMixedSticker(
   const wTot = 78;
   const wSize =
     (PAGE_W - 2 * x0 - 4 - wArt - wCol - wPoly - wTot) / sizes.length;
-  // taller size header, shorter Article/Color header, data rows, then two
-  // blank rows for hand-written articles (per the manual's sticker photo)
-  const EMPTY_ROWS = 2;
+  // taller size header, shorter Article/Color header, then data rows padded
+  // to a minimum of three so short carts still have blank rows for
+  // hand-written articles (per the manual's sticker photo)
+  const MIN_DATA_ROWS = 3;
   const yTop = 116;
   const yBot = PAGE_H - 16;
-  const unit =
-    (yBot - yTop) / (1.35 + 0.65 + articles.length + EMPTY_ROWS);
+  const dataRows = Math.max(articles.length, MIN_DATA_ROWS);
+  const unit = (yBot - yTop) / (1.35 + 0.65 + dataRows);
   const headH = 1.35 * unit;
   const subH = 0.65 * unit;
 
@@ -423,7 +424,6 @@ function drawMixedSticker(
   const totalPolybags = articles.reduce((a, b) => a + b.polybags, 0);
   tableCell(doc, totalX, y1, wTot, yBot - y1, String(totalPolybags));
 
-  const dataRows = articles.length + EMPTY_ROWS;
   const y2 = y1 + subH;
   for (let i = 0; i < dataRows; i += 1) {
     const a = i < articles.length ? articles[i] : null;
