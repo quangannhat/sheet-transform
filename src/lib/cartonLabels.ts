@@ -389,47 +389,64 @@ function drawMixedSticker(
   const wTot = 78;
   const wSize =
     (PAGE_W - 2 * x0 - 4 - wArt - wCol - wPoly - wTot) / sizes.length;
+  // taller size header, shorter Article/Color header, data rows, then two
+  // blank rows for hand-written articles (per the manual's sticker photo)
+  const EMPTY_ROWS = 2;
   const yTop = 116;
   const yBot = PAGE_H - 16;
-  const rowH = (yBot - yTop) / (articles.length + 2);
+  const unit =
+    (yBot - yTop) / (1.35 + 0.65 + articles.length + EMPTY_ROWS);
+  const headH = 1.35 * unit;
+  const subH = 0.65 * unit;
 
   let x = x0;
-  tableCell(doc, x, yTop, wArt, rowH, "", TABLE_FONT_SIZE);
+  tableCell(doc, x, yTop, wArt, headH, "", TABLE_FONT_SIZE);
   x += wArt;
-  tableCell(doc, x, yTop, wCol, rowH, "Size:", TABLE_FONT_SIZE);
+  tableCell(doc, x, yTop, wCol, headH, "Size:", TABLE_FONT_SIZE);
   x += wCol;
   for (const s of sizes) {
-    tableCell(doc, x, yTop, wSize, rowH, s, TABLE_FONT_SIZE);
+    tableCell(doc, x, yTop, wSize, headH, s, TABLE_FONT_SIZE);
     x += wSize;
   }
-  tableCell(doc, x, yTop, wPoly, rowH, "Polybags");
+  tableCell(doc, x, yTop, wPoly, headH, "Polybags");
   x += wPoly;
   const totalX = x;
-  tableCell(doc, totalX, yTop, wTot, rowH, "Total Polybags");
+  tableCell(doc, totalX, yTop, wTot, headH, "Total Polybags");
 
-  const y1 = yTop + rowH;
+  const y1 = yTop + headH;
   x = x0 + wArt + wCol;
-  tableCell(doc, x0, y1, wArt, rowH, "Article no:", TABLE_FONT_SIZE);
-  tableCell(doc, x0 + wArt, y1, wCol, rowH, "Color no:", TABLE_FONT_SIZE);
+  tableCell(doc, x0, y1, wArt, subH, "Article no:", TABLE_FONT_SIZE);
+  tableCell(doc, x0 + wArt, y1, wCol, subH, "Color no:", TABLE_FONT_SIZE);
   for (let i = 0; i < sizes.length; i += 1) {
-    tableCell(doc, x, y1, wSize, rowH, "", TABLE_FONT_SIZE);
+    tableCell(doc, x, y1, wSize, subH, "", TABLE_FONT_SIZE);
     x += wSize;
   }
-  tableCell(doc, x, y1, wPoly, rowH, "", TABLE_FONT_SIZE);
+  tableCell(doc, x, y1, wPoly, subH, "", TABLE_FONT_SIZE);
   const totalPolybags = articles.reduce((a, b) => a + b.polybags, 0);
   tableCell(doc, totalX, y1, wTot, yBot - y1, String(totalPolybags));
 
-  articles.forEach((a, i) => {
-    const y = yTop + (i + 2) * rowH;
+  const dataRows = articles.length + EMPTY_ROWS;
+  const y2 = y1 + subH;
+  for (let i = 0; i < dataRows; i += 1) {
+    const a = i < articles.length ? articles[i] : null;
+    const y = y2 + i * unit;
     x = x0 + wArt + wCol;
-    tableCell(doc, x0, y, wArt, rowH, a.art, TABLE_FONT_SIZE);
-    tableCell(doc, x0 + wArt, y, wCol, rowH, a.col, TABLE_FONT_SIZE);
+    tableCell(doc, x0, y, wArt, unit, a ? a.art : "", TABLE_FONT_SIZE);
+    tableCell(doc, x0 + wArt, y, wCol, unit, a ? a.col : "", TABLE_FONT_SIZE);
     for (const s of sizes) {
-      tableCell(doc, x, y, wSize, rowH, a.qtys.get(s) ?? "", TABLE_FONT_SIZE);
+      tableCell(
+        doc,
+        x,
+        y,
+        wSize,
+        unit,
+        a ? (a.qtys.get(s) ?? "") : "",
+        TABLE_FONT_SIZE,
+      );
       x += wSize;
     }
-    tableCell(doc, x, y, wPoly, rowH, String(a.polybags));
-  });
+    tableCell(doc, x, y, wPoly, unit, a ? String(a.polybags) : "");
+  }
 }
 
 export async function buildLabelsPdf(
