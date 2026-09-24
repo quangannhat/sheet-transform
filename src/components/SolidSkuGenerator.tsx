@@ -15,6 +15,9 @@ type Status =
       xlsx: GeneratedFile;
       pdf?: GeneratedFile;
       pdfError?: string;
+      polybag?: GeneratedFile;
+      polybagError?: string;
+      polybagSkipped?: boolean;
       rowCount: number;
       mixedCount: number;
     };
@@ -56,6 +59,15 @@ async function readErrors(res: Response): Promise<string[]> {
   return body?.errors ?? [`Request failed (${res.status})`];
 }
 
+function fileNameFrom(res: Response, fallback: string): string {
+  return (
+    decodeURIComponent(
+      /filename\*=UTF-8''([^;]+)/i
+        .exec(res.headers.get("content-disposition") ?? "")?.[1] ?? "",
+    ) || fallback
+  );
+}
+
 export function SolidSkuGenerator() {
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const [pending, setPending] = useState(false);
@@ -75,27 +87,30 @@ export function SolidSkuGenerator() {
     setPending(true);
     revokeAll();
     try {
+      // step 1: build the SOLID SKU workbook
       const res = await fetch("/api/solid-sku", { method: "POST", body: data });
       if (!(res.headers.get("content-type") ?? "").includes("spreadsheetml")) {
         setStatus({ kind: "error", messages: await readErrors(res) });
         return;
       }
 
-      const xlsxName =
-        decodeURIComponent(
-          /filename\*=UTF-8''([^;]+)/i
-            .exec(res.headers.get("content-disposition") ?? "")?.[1] ?? "",
-        ) || "SOLID_SKU_output.xlsx";
+      const xlsxName = fileNameFrom(res, "SOLID_SKU_output.xlsx");
       const xlsxUrl = URL.createObjectURL(await res.blob());
       urlsRef.current.push(xlsxUrl);
       download(xlsxUrl, xlsxName);
+      // reuse the generated workbook as input for the two PDF steps
+      const xlsxBlob = await blobFromXlsx(xlsxUrl);
+      const rowCount = Number(res.headers.get("x-row-count") ?? 0);
+      const mixedCount = Number(res.headers.get("x-mixed-count") ?? 0);
 
-      // step 2: build the carton-labels PDF from the generated workbook
+      const xlsxFile = () =>
+        new File([xlsxBlob], xlsxName, { type: XLSX_MIME });
+
+      // step 2: carton-labels PDF from the generated workbook
+      let pdf: GeneratedFile | undefined;
+      let pdfError: string | undefined;
       const pdfData = new FormData();
-      pdfData.set(
-        "file",
-        new File([await blobFromXlsx(xlsxUrl)], xlsxName, { type: XLSX_MIME }),
-      );
+      pdfData.set("file", xlsxFile());
       pdfData.set("serialBase", serialBase);
       const pdfRes = await fetch("/api/solid-sku/labels", {
         method: "POST",
@@ -104,31 +119,52 @@ export function SolidSkuGenerator() {
       if (
         (pdfRes.headers.get("content-type") ?? "").includes("application/pdf")
       ) {
-        const pdfName =
-          decodeURIComponent(
-            /filename\*=UTF-8''([^;]+)/i
-              .exec(pdfRes.headers.get("content-disposition") ?? "")?.[1] ?? "",
-          ) || "SOLID_SKU labels.pdf";
+        const pdfName = fileNameFrom(pdfRes, "SOLID_SKU labels.pdf");
         const pdfUrl = URL.createObjectURL(await pdfRes.blob());
         urlsRef.current.push(pdfUrl);
         download(pdfUrl, pdfName);
-        setStatus({
-          kind: "done",
-          xlsx: { url: xlsxUrl, name: xlsxName },
-          pdf: { url: pdfUrl, name: pdfName },
-          rowCount: Number(pdfRes.headers.get("x-row-count") ?? 0),
-          mixedCount: Number(res.headers.get("x-mixed-count") ?? 0),
-        });
+        pdf = { url: pdfUrl, name: pdfName };
       } else {
-        const errs = await readErrors(pdfRes);
-        setStatus({
-          kind: "done",
-          xlsx: { url: xlsxUrl, name: xlsxName },
-          pdfError: errs.join("\n"),
-          rowCount: Number(res.headers.get("x-row-count") ?? 0),
-          mixedCount: Number(res.headers.get("x-mixed-count") ?? 0),
-        });
+        pdfError = (await readErrors(pdfRes)).join("\n");
       }
+
+      // step 3: polybag LPN stickers from the same workbook (mixed cartons)
+      let polybag: GeneratedFile | undefined;
+      let polybagError: string | undefined;
+      let polybagSkipped = false;
+      if (mixedCount > 0) {
+        const polyData = new FormData();
+        polyData.set("file", xlsxFile());
+        const polyRes = await fetch("/api/solid-sku/polybags", {
+          method: "POST",
+          body: polyData,
+        });
+        if (
+          (polyRes.headers.get("content-type") ?? "").includes("application/pdf")
+        ) {
+          const polyName = fileNameFrom(polyRes, "SOLID_SKU polybag labels.pdf");
+          const polyUrl = URL.createObjectURL(await polyRes.blob());
+          urlsRef.current.push(polyUrl);
+          download(polyUrl, polyName);
+          polybag = { url: polyUrl, name: polyName };
+        } else {
+          polybagError = (await readErrors(polyRes)).join("\n");
+        }
+      } else {
+        polybagSkipped = true;
+      }
+
+      setStatus({
+        kind: "done",
+        xlsx: { url: xlsxUrl, name: xlsxName },
+        pdf,
+        pdfError,
+        polybag,
+        polybagError,
+        polybagSkipped,
+        rowCount,
+        mixedCount,
+      });
     } catch {
       setStatus({ kind: "error", messages: ["Network request failed."] });
     } finally {
@@ -221,6 +257,19 @@ export function SolidSkuGenerator() {
               &#10007; PDF step failed: {status.pdfError}
             </p>
           )}
+          {status.polybag && (
+            <p>
+              &#10003; polybag labels PDF ({status.polybag.name})
+            </p>
+          )}
+          {status.polybagError && (
+            <p className="text-red-600 dark:text-red-400">
+              &#10007; polybag step failed: {status.polybagError}
+            </p>
+          )}
+          {status.polybagSkipped && (
+            <p>No mixed cartons &mdash; polybag labels skipped.</p>
+          )}
           <p className="text-green-700 dark:text-green-400">
             Downloads didn&rsquo;t start?{" "}
             <a
@@ -239,6 +288,18 @@ export function SolidSkuGenerator() {
                   className="underline underline-offset-2"
                 >
                   {status.pdf.name}
+                </a>
+              </>
+            )}
+            {status.polybag && (
+              <>
+                {" · "}
+                <a
+                  href={status.polybag.url}
+                  download={status.polybag.name}
+                  className="underline underline-offset-2"
+                >
+                  {status.polybag.name}
                 </a>
               </>
             )}

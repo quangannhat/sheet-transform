@@ -16,16 +16,16 @@ export default function Home() {
           with the EAN lookup and LPN numbering &mdash; mixed cartons become one
           polybag row per size cell (each with its own LPN/EAN), exactly like
           <code className="rounded bg-zinc-100 px-1 py-0.5 text-[0.85em] dark:bg-zinc-800">solid_sku_gen.py</code>.
-          A carton-labels PDF (one A5 label sheet per carton) is generated as
-          the second step; mixed cartons get the supplier-manual version-2
-          sticker without an LPN. A separate section prints the polybag LPN
-          stickers (version 1+2) for the mixed-carton rows.
+          A carton-labels PDF (one A5 label sheet per carton) and a polybag LPN
+          sticker PDF (version 1+2, mixed-carton rows only) are generated from
+          that workbook as the second and third steps; mixed cartons get the
+          supplier-manual version-2 box sticker without an LPN.
         </p>
       </header>
       <SolidSkuGenerator />
       <footer className="flex flex-wrap items-baseline gap-x-3 text-xs text-zinc-500">
         <span className="rounded-full border border-zinc-300 px-2 py-0.5 font-medium text-zinc-600 dark:border-zinc-700 dark:text-zinc-400">
-          v7 &middot; + polybag LPN stickers for mixed cartons
+          v8 &middot; one upload &rarr; workbook + carton + polybag PDFs
         </span>
         <span aria-live="polite">
           {BUILD_SHA
