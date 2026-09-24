@@ -339,9 +339,7 @@ function drawMixedSticker(
   const r0 = g.rows[0];
   doc.lineWidth(1).rect(2, 3, PAGE_W - 4, PAGE_H - 9).stroke();
 
-  boxLabel(doc, 24, 28, 236, 76, [
-    { text: `Order no:${r0.po}`, size: LABEL_FONT_SIZE },
-  ]);
+  tableCell(doc, 24, 28, 236, 76, `Order no: ${r0.po}`);
   if (poBarcode) {
     doc.image(poBarcode.buffer, 270, 34, { width: poBarcode.widthPt });
     barcodeCaption(doc, poBarcode, 270, 34, r0.po, 12, 0.8);

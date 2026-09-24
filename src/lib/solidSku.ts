@@ -82,7 +82,7 @@ function poNumber(rows: Cell[][]): string {
   for (const row of rows.slice(0, 20)) {
     const flat = row.filter((c) => c !== null);
     if (flat.length >= 2) {
-      const first = String(flat[0]).trim().toUpperCase();
+      const first = String(flat[0]).trim().toUpperCase().replace(/[\s:]+$/, "");
       if (first === "P/O NR" || first === "P/O NO" || first === "PO NR") {
         return String(flat[1]).trim();
       }
@@ -138,6 +138,25 @@ export async function loadWorkbook(
   return wb;
 }
 
+/** Locate art/color/size/barcode columns by header name (export layouts vary). */
+function detectBarcodeColumns(
+  rows: Cell[][],
+): { art: number; color: number; size: number; barcode: number } | null {
+  for (const row of rows.slice(0, 15)) {
+    const norm = row.map((c) =>
+      c === null ? "" : String(c).trim().toLowerCase(),
+    );
+    const pick = (...names: string[]) => norm.findIndex((v) => names.includes(v));
+    const barcode = pick("barcode");
+    if (barcode === -1) continue;
+    const art = pick("art no:", "art no", "item number");
+    const color = pick("color id", "color", "colour");
+    const size = pick("size", "sizes");
+    if (art !== -1 && color !== -1 && size !== -1) return { art, color, size, barcode };
+  }
+  return null;
+}
+
 /** barcode file: (art_bare, color_code_normalized, size_upper) → barcode int */
 export async function buildBarcodeMap(
   fileBuffer: Buffer,
@@ -145,13 +164,19 @@ export async function buildBarcodeMap(
   const wb = await loadWorkbook(fileBuffer);
   const ws = wb.worksheets[0];
   if (!ws) throw new Error("Barcode file has no worksheets");
+  const allRows = readRows(ws);
+  const cols = detectBarcodeColumns(allRows) ?? {
+    art: 1,
+    color: 2,
+    size: 3,
+    barcode: 4,
+  };
   const barcodes = new Map<string, number>();
-  for (const row of readRows(ws)) {
-    // expect: [name, art, color, size, barcode, ...]
-    const artRaw = row[1] ?? null;
-    const colorRaw = row[2] ?? null;
-    const sizeRaw = row[3] ?? null;
-    const bcRaw = row[4] ?? null;
+  for (const row of allRows) {
+    const artRaw = row[cols.art] ?? null;
+    const colorRaw = row[cols.color] ?? null;
+    const sizeRaw = row[cols.size] ?? null;
+    const bcRaw = row[cols.barcode] ?? null;
     if (!artRaw || !bcRaw) continue;
     const bc = asInt(bcRaw);
     if (bc === null) continue;
