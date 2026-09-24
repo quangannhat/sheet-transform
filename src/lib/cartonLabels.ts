@@ -445,7 +445,15 @@ function drawMixedSticker(
       );
       x += wSize;
     }
-    tableCell(doc, x, y, wPoly, unit, a ? String(a.polybags) : "");
+    tableCell(
+      doc,
+      x,
+      y,
+      wPoly,
+      unit,
+      a ? String(a.polybags) : "",
+      TABLE_FONT_SIZE,
+    );
   }
 }
 
