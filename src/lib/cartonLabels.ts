@@ -290,12 +290,9 @@ function fitCellText(
     let cur = "";
     let overflow = false;
     for (const word of text.split(/\s+/)) {
-      if (doc.widthOfString(word) > usableW) {
-        overflow = true;
-        break;
-      }
+      if (doc.widthOfString(word) > usableW) overflow = true;
       const cand = cur ? `${cur} ${word}` : word;
-      if (doc.widthOfString(cand) <= usableW) cur = cand;
+      if (!cur || doc.widthOfString(cand) <= usableW) cur = cand;
       else {
         lines.push(cur);
         cur = word;
@@ -305,7 +302,8 @@ function fitCellText(
     if (!overflow && lines.length * size * 1.25 <= usableH) {
       return { size, lines };
     }
-    if (size <= 6) return overflow ? null : { size, lines };
+    // at the floor render the best layout even if slightly too wide
+    if (size <= 6) return { size: 6, lines };
     size = Math.max(6, size - 2);
   }
 }
@@ -587,9 +585,9 @@ export async function buildLabelsPdf(
   return done;
 }
 
-/** A6 landscape (148 x 105 mm) polybag sticker page. */
-const PB_W = 419.53;
-const PB_H = 297.64;
+/** A6 portrait (105 x 148 mm) polybag sticker page. */
+const PB_W = 297.64;
+const PB_H = 419.53;
 
 /** LPN as a 14-digit barcode number; its last 7 digits are the Carton No. */
 function lpnDigits(raw: string): string {
@@ -639,58 +637,76 @@ export async function buildPolybagLabelsPdf(rows: LabelRow[]): Promise<Buffer> {
   });
 
   const m = 16;
-  // design the block in portrait-ish local coords, then rotate it 90° and
-  // center it on the landscape page
-  const bw = PB_H - 2 * m;
-  const ch = 224;
-  const wA = 76;
-  const wC = 76;
-  const wS = 54;
+  const bw = PB_W - 2 * m;
+  const wA = 70;
+  const wC = 70;
+  const wS = 48;
+  // three stacked blocks — LPN barcode, boxes, EAN barcode — with the free
+  // page height split evenly between the two gaps
+  const lpnY = 22;
+  const lpnBlockH = 52; // 13 mm bars + caption digits
+  const eanBlockH = 48; // 12 mm bars + caption digits
+  const row1H = 32;
+  const row2H = 50;
+  const boxGap = 10;
+  const boxBlockH = row1H + boxGap + row2H;
+  const gap =
+    (PB_H - 2 * lpnY - lpnBlockH - boxBlockH - eanBlockH) / 2;
+  const boxesY = lpnY + lpnBlockH + gap;
+  const eanY = boxesY + boxBlockH + gap;
   mixed.forEach((r, i) => {
     doc.addPage({ size: [PB_W, PB_H], margin: 0 });
     doc.lineWidth(1).rect(2, 3, PB_W - 4, PB_H - 9).stroke();
 
-    doc.save();
-    doc.translate((PB_W - ch) / 2, (PB_H + bw) / 2);
-    doc.rotate(-90);
-
     const lb = lpnBars[i];
     if (lb) {
-      const lx = (bw - lb.widthPt) / 2;
-      doc.image(lb.buffer, lx, 6, { width: lb.widthPt });
-      barcodeCaption(doc, lb, lx, 6, lpns[i], 10, 0.8);
+      doc.image(lb.buffer, (PB_W - lb.widthPt) / 2, lpnY, {
+        width: lb.widthPt,
+      });
+      barcodeCaption(
+        doc,
+        lb,
+        (PB_W - lb.widthPt) / 2,
+        lpnY,
+        lpns[i],
+        10,
+        0.8,
+      );
     }
 
-    tableCell(doc, m, 58, 122, 32, `Order No: ${r.po}`);
-    tableCell(doc, m + 126, 58, bw - m - (m + 126), 32, `LPN Carton No: ${lpns[i].slice(-7)}`);
+    tableCell(doc, m, boxesY, 122, row1H, `Order No: ${r.po}`);
+    tableCell(
+      doc,
+      m + 126,
+      boxesY,
+      bw - m - (m + 126),
+      row1H,
+      `LPN Carton No: ${lpns[i].slice(-7)}`,
+    );
 
-    const y2 = 98;
-    const h2 = 50;
-    tableCell(doc, m, y2, wA, h2, `Article no: ${r.art}`);
-    tableCell(doc, m + wA, y2, wC, h2, `Color no: ${r.col}`);
-    tableCell(doc, m + wA + wC, y2, wS, h2, `Size: ${r.size}`);
+    const y2 = boxesY + row1H + boxGap;
+    tableCell(doc, m, y2, wA, row2H, `Article no: ${r.art}`);
+    tableCell(doc, m + wA, y2, wC, row2H, `Color no: ${r.col}`);
+    tableCell(doc, m + wA + wC, y2, wS, row2H, `Size: ${r.size}`);
     tableCell(
       doc,
       m + wA + wC + wS,
       y2,
       bw - m - (m + wA + wC + wS),
-      h2,
+      row2H,
       `QTY/pcs: ${r.qty}`,
     );
 
     const eb = eanBars[i];
     if (eb) {
-      const ex = (bw - eb.widthPt) / 2;
-      const ey = 166;
-      doc.image(eb.buffer, ex, ey, { width: eb.widthPt });
+      const ex = (PB_W - eb.widthPt) / 2;
+      doc.image(eb.buffer, ex, eanY, { width: eb.widthPt });
       const eanDigits =
         r.ean.length === 14 && r.ean.startsWith("0")
           ? r.ean.slice(1)
           : r.ean;
-      barcodeCaption(doc, eb, ex, ey, eanDigits, 10, 1.8);
+      barcodeCaption(doc, eb, ex, eanY, eanDigits, 10, 1.8);
     }
-
-    doc.restore();
   });
 
   doc.end();
