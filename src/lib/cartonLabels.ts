@@ -587,9 +587,9 @@ export async function buildLabelsPdf(
   return done;
 }
 
-/** A6 portrait (105 x 148 mm) polybag sticker page. */
-const PB_W = 297.64;
-const PB_H = 419.53;
+/** A6 landscape (148 x 105 mm) polybag sticker page. */
+const PB_W = 419.53;
+const PB_H = 297.64;
 
 /** LPN as a 14-digit barcode number; its last 7 digits are the Carton No. */
 function lpnDigits(raw: string): string {
@@ -639,25 +639,33 @@ export async function buildPolybagLabelsPdf(rows: LabelRow[]): Promise<Buffer> {
   });
 
   const m = 16;
+  // design the block in portrait-ish local coords, then rotate it 90° and
+  // center it on the landscape page
+  const bw = PB_H - 2 * m;
+  const ch = 224;
+  const wA = 76;
+  const wC = 76;
+  const wS = 54;
   mixed.forEach((r, i) => {
     doc.addPage({ size: [PB_W, PB_H], margin: 0 });
     doc.lineWidth(1).rect(2, 3, PB_W - 4, PB_H - 9).stroke();
 
+    doc.save();
+    doc.translate((PB_W - ch) / 2, (PB_H + bw) / 2);
+    doc.rotate(-90);
+
     const lb = lpnBars[i];
     if (lb) {
-      const lx = (PB_W - lb.widthPt) / 2;
-      doc.image(lb.buffer, lx, 16, { width: lb.widthPt });
-      barcodeCaption(doc, lb, lx, 16, lpns[i], 10, 0.8);
+      const lx = (bw - lb.widthPt) / 2;
+      doc.image(lb.buffer, lx, 6, { width: lb.widthPt });
+      barcodeCaption(doc, lb, lx, 6, lpns[i], 10, 0.8);
     }
 
-    tableCell(doc, m, 80, 122, 34, `Order No: ${r.po}`);
-    tableCell(doc, m + 126, 80, PB_W - m - (m + 126), 34, `LPN Carton No: ${lpns[i].slice(-7)}`);
+    tableCell(doc, m, 58, 122, 32, `Order No: ${r.po}`);
+    tableCell(doc, m + 126, 58, bw - m - (m + 126), 32, `LPN Carton No: ${lpns[i].slice(-7)}`);
 
-    const wA = 76;
-    const wC = 76;
-    const wS = 54;
-    const y2 = 120;
-    const h2 = 52;
+    const y2 = 98;
+    const h2 = 50;
     tableCell(doc, m, y2, wA, h2, `Article no: ${r.art}`);
     tableCell(doc, m + wA, y2, wC, h2, `Color no: ${r.col}`);
     tableCell(doc, m + wA + wC, y2, wS, h2, `Size: ${r.size}`);
@@ -665,15 +673,15 @@ export async function buildPolybagLabelsPdf(rows: LabelRow[]): Promise<Buffer> {
       doc,
       m + wA + wC + wS,
       y2,
-      PB_W - m - (m + wA + wC + wS),
+      bw - m - (m + wA + wC + wS),
       h2,
       `QTY/pcs: ${r.qty}`,
     );
 
     const eb = eanBars[i];
     if (eb) {
-      const ex = (PB_W - eb.widthPt) / 2;
-      const ey = PB_H - 118;
+      const ex = (bw - eb.widthPt) / 2;
+      const ey = 166;
       doc.image(eb.buffer, ex, ey, { width: eb.widthPt });
       const eanDigits =
         r.ean.length === 14 && r.ean.startsWith("0")
@@ -681,6 +689,8 @@ export async function buildPolybagLabelsPdf(rows: LabelRow[]): Promise<Buffer> {
           : r.ean;
       barcodeCaption(doc, eb, ex, ey, eanDigits, 10, 1.8);
     }
+
+    doc.restore();
   });
 
   doc.end();
