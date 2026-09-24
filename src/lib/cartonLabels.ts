@@ -37,6 +37,20 @@ export function cartonLabelFileName(sourceName: string): string {
   return `${base} labels.pdf`;
 }
 
+export function polybagLabelFileName(sourceName: string): string {
+  const base = sourceName.replace(/\.xl[sm]?$/i, "") || "SOLID_SKU";
+  return `${base} polybag labels.pdf`;
+}
+
+/** Mixed-carton rows only: box numbers that appear on more than one row. */
+export function filterMixedRows(rows: LabelRow[]): LabelRow[] {
+  const counts = new Map<string, number>();
+  for (const r of rows) {
+    counts.set(r.boxLabel, (counts.get(r.boxLabel) ?? 0) + 1);
+  }
+  return rows.filter((r) => (counts.get(r.boxLabel) ?? 0) > 1);
+}
+
 /** Serial numbers in the sample: 12471600000050, ...51, ...62 = base + solid-carton index (mixed cartons take no LPN sticker serial) */
 export function cartonSerial(serialBase: number, rowIndex: number): string {
   return String(serialBase + rowIndex + 1);
@@ -567,6 +581,106 @@ export async function buildLabelsPdf(
       { text: "NUMBER:", size: 17 },
       { text: r.boxLabel, size: 22 },
     ]);
+  });
+
+  doc.end();
+  return done;
+}
+
+/** A6 portrait (105 x 148 mm) polybag sticker page. */
+const PB_W = 297.64;
+const PB_H = 419.53;
+
+/** LPN as a 14-digit barcode number; its last 7 digits are the Carton No. */
+function lpnDigits(raw: string): string {
+  return raw.replace(/\D/g, "").padStart(14, "0");
+}
+
+/**
+ * "Mixed/partial carton sticker version 1+2" — one LPN sticker per polybag
+ * row of a mixed carton (the carton sticker itself carries no LPN):
+ * LPN barcode on top, Order No + LPN Carton No, Article/Color/Size/QTY,
+ * and the EAN 13 SKU barcode at the bottom.
+ */
+export async function buildPolybagLabelsPdf(rows: LabelRow[]): Promise<Buffer> {
+  const mixed = filterMixedRows(rows);
+  if (mixed.length === 0) {
+    throw new Error("No mixed-carton rows found in the workbook");
+  }
+  const renderLpn = cachedRenderer("code128", 200, 13);
+  const renderEan = cachedRenderer("ean13", 190, 12);
+
+  const lpns = mixed.map((r) => lpnDigits(r.lpn));
+  const lpnBars = await Promise.all(
+    mixed.map((_, i) => renderLpn(lpns[i])),
+  );
+  const eanBars = await Promise.all(
+    mixed.map((r) => (r.ean ? renderEan(r.ean) : Promise.resolve(null))),
+  );
+
+  const doc = new PDFDocument({
+    size: [PB_W, PB_H],
+    margin: 0,
+    autoFirstPage: false,
+  });
+  doc.registerFont(
+    LABEL_FONT,
+    Buffer.from(ARIAL_BOLD_TTF_BASE64, "base64"),
+  );
+  doc.registerFont(
+    ARIAL_REGULAR_FONT,
+    Buffer.from(ARIAL_REGULAR_TTF_BASE64, "base64"),
+  );
+  const chunks: Buffer[] = [];
+  doc.on("data", (c: Buffer) => chunks.push(c));
+  const done = new Promise<Buffer>((resolve, reject) => {
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+  });
+
+  const m = 16;
+  mixed.forEach((r, i) => {
+    doc.addPage({ size: [PB_W, PB_H], margin: 0 });
+    doc.lineWidth(1).rect(2, 3, PB_W - 4, PB_H - 9).stroke();
+
+    const lb = lpnBars[i];
+    if (lb) {
+      const lx = (PB_W - lb.widthPt) / 2;
+      doc.image(lb.buffer, lx, 16, { width: lb.widthPt });
+      barcodeCaption(doc, lb, lx, 16, lpns[i], 10, 0.8);
+    }
+
+    tableCell(doc, m, 80, 122, 34, `Order No: ${r.po}`);
+    tableCell(doc, m + 126, 80, PB_W - m - (m + 126), 34, `LPN Carton No: ${lpns[i].slice(-7)}`);
+
+    const wA = 76;
+    const wC = 76;
+    const wS = 54;
+    const y2 = 120;
+    const h2 = 52;
+    tableCell(doc, m, y2, wA, h2, `Article no: ${r.art}`);
+    tableCell(doc, m + wA, y2, wC, h2, `Color no: ${r.col}`);
+    tableCell(doc, m + wA + wC, y2, wS, h2, `Size: ${r.size}`);
+    tableCell(
+      doc,
+      m + wA + wC + wS,
+      y2,
+      PB_W - m - (m + wA + wC + wS),
+      h2,
+      `QTY/pcs: ${r.qty}`,
+    );
+
+    const eb = eanBars[i];
+    if (eb) {
+      const ex = (PB_W - eb.widthPt) / 2;
+      const ey = PB_H - 118;
+      doc.image(eb.buffer, ex, ey, { width: eb.widthPt });
+      const eanDigits =
+        r.ean.length === 14 && r.ean.startsWith("0")
+          ? r.ean.slice(1)
+          : r.ean;
+      barcodeCaption(doc, eb, ex, ey, eanDigits, 10, 1.8);
+    }
   });
 
   doc.end();

@@ -18,13 +18,14 @@ export default function Home() {
           <code className="rounded bg-zinc-100 px-1 py-0.5 text-[0.85em] dark:bg-zinc-800">solid_sku_gen.py</code>.
           A carton-labels PDF (one A5 label sheet per carton) is generated as
           the second step; mixed cartons get the supplier-manual version-2
-          sticker without an LPN.
+          sticker without an LPN. A separate section prints the polybag LPN
+          stickers (version 1+2) for the mixed-carton rows.
         </p>
       </header>
       <SolidSkuGenerator />
       <footer className="flex flex-wrap items-baseline gap-x-3 text-xs text-zinc-500">
         <span className="rounded-full border border-zinc-300 px-2 py-0.5 font-medium text-zinc-600 dark:border-zinc-700 dark:text-zinc-400">
-          v6 &middot; mixed cartons: polybag rows + version-2 sticker
+          v7 &middot; + polybag LPN stickers for mixed cartons
         </span>
         <span aria-live="polite">
           {BUILD_SHA

@@ -247,6 +247,7 @@ export function SolidSkuGenerator() {
       )}
 
       <LabelsPdfCard />
+      <PolybagLabelsCard />
     </div>
   );
 }
@@ -256,7 +257,19 @@ async function blobFromXlsx(url: string): Promise<Blob> {
   return res.blob();
 }
 
-function LabelsPdfCard() {
+function SolidSkuPdfCard({
+  title,
+  endpoint,
+  fallbackName,
+  buttonLabel,
+  withSerialBase,
+}: {
+  title: string;
+  endpoint: string;
+  fallbackName: string;
+  buttonLabel: string;
+  withSerialBase: boolean;
+}) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string[] | null>(null);
   const [done, setDone] = useState<GeneratedFile | null>(null);
@@ -267,7 +280,7 @@ function LabelsPdfCard() {
     setError(null);
     setDone(null);
     try {
-      const res = await fetch("/api/solid-sku/labels", {
+      const res = await fetch(endpoint, {
         method: "POST",
         body: new FormData(event.currentTarget),
       });
@@ -279,7 +292,7 @@ function LabelsPdfCard() {
         decodeURIComponent(
           /filename\*=UTF-8''([^;]+)/i
             .exec(res.headers.get("content-disposition") ?? "")?.[1] ?? "",
-        ) || "carton labels.pdf";
+        ) || fallbackName;
       const url = URL.createObjectURL(await res.blob());
       download(url, name);
       setDone({ url, name });
@@ -293,7 +306,7 @@ function LabelsPdfCard() {
   return (
     <form onSubmit={onSubmit} className={cardClass}>
       <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
-        Carton labels PDF from an existing SOLID SKU file
+        {title}
       </h2>
       <label className={labelClass}>
         SOLID SKU workbook (generated output)
@@ -305,18 +318,20 @@ function LabelsPdfCard() {
           className={fileInputClass}
         />
       </label>
-      <label className={`sm:max-w-xs ${labelClass}`}>
-        Carton serial base (optional)
-        <input
-          type="text"
-          inputMode="numeric"
-          name="serialBase"
-          placeholder="12471600000049"
-          className={inputClass}
-        />
-      </label>
+      {withSerialBase && (
+        <label className={`sm:max-w-xs ${labelClass}`}>
+          Carton serial base (optional)
+          <input
+            type="text"
+            inputMode="numeric"
+            name="serialBase"
+            placeholder="12471600000049"
+            className={inputClass}
+          />
+        </label>
+      )}
       <button type="submit" disabled={pending} className={buttonClass}>
-        {pending ? "Working…" : "Download labels PDF →"}
+        {pending ? "Working…" : buttonLabel}
       </button>
       {error && <Errors messages={error} />}
       {done && (
@@ -332,5 +347,29 @@ function LabelsPdfCard() {
         </p>
       )}
     </form>
+  );
+}
+
+function LabelsPdfCard() {
+  return (
+    <SolidSkuPdfCard
+      title="Carton labels PDF from an existing SOLID SKU file"
+      endpoint="/api/solid-sku/labels"
+      fallbackName="carton labels.pdf"
+      buttonLabel="Download labels PDF →"
+      withSerialBase
+    />
+  );
+}
+
+function PolybagLabelsCard() {
+  return (
+    <SolidSkuPdfCard
+      title="Polybag labels PDF (LPN on each polybag of mixed cartons)"
+      endpoint="/api/solid-sku/polybags"
+      fallbackName="polybag labels.pdf"
+      buttonLabel="Download polybag labels PDF →"
+      withSerialBase={false}
+    />
   );
 }
