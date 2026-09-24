@@ -289,7 +289,7 @@ export async function writeOutput(
   barcodes: Map<string, number>,
   totalCartons: number | null,
   po: string,
-  lpnStart: number,
+  lpnStart: string,
 ): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("SOLID SKU");
@@ -324,7 +324,7 @@ export async function writeOutput(
   }
 
   const tc = totalCartons ?? records.length;
-  let lpn = lpnStart;
+  let lpn = BigInt(lpnStart);
 
   for (const r of records) {
     const bc = getBarcode(barcodes, r.artBare, r.colRaw, r.size);
@@ -346,7 +346,7 @@ export async function writeOutput(
       cell.alignment = center;
       cell.border = cellBorder;
     }
-    lpn += 1;
+    lpn += BigInt(1);
   }
 
   const colWidths = [18, 12, 22, 14, 12, 8, 10, 22, 18, 14];
@@ -361,7 +361,7 @@ export async function writeOutput(
 export async function generate(
   plBuffer: Buffer,
   barcodeBuffer: Buffer,
-  lpnStart: number,
+  lpnStart: string,
 ): Promise<GenerateResult> {
   const barcodes = await buildBarcodeMap(barcodeBuffer);
   const { records, totalCartons, po } = await parsePl(plBuffer);

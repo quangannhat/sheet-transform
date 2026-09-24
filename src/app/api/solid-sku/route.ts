@@ -41,13 +41,14 @@ export async function POST(request: Request): Promise<Response> {
   } else if (!isExcel(barcodeFile)) {
     errors.push("• Barcode file must be .xlsx or .xlsm");
   }
-  let lpnStart = 0;
+  let lpnStart = "";
   if (!lpnRaw) {
     errors.push("• LPN start number is required");
   } else if (!/^-?\d+$/.test(lpnRaw)) {
     errors.push("• LPN start must be a number");
   } else {
-    lpnStart = Number.parseInt(lpnRaw, 10);
+    // keep the raw digits: BigInt-safe sequencing in writeOutput
+    lpnStart = lpnRaw;
   }
   if (errors.length > 0) return badRequest(errors);
 

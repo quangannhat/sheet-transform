@@ -641,19 +641,32 @@ export async function buildPolybagLabelsPdf(rows: LabelRow[]): Promise<Buffer> {
   const wA = 70;
   const wC = 70;
   const wS = 48;
-  // three stacked blocks — LPN barcode, boxes, EAN barcode — with the free
-  // page height split evenly between the two gaps
-  const lpnY = 22;
-  const lpnBlockH = 52; // 13 mm bars + caption digits
+  // three stacked blocks with modest fixed gaps, centered as a whole
+  const lpnBlockH = 54; // 13 mm bars + caption digits
   const eanBlockH = 48; // 12 mm bars + caption digits
   const row1H = 32;
   const row2H = 50;
   const boxGap = 10;
+  const blockGap = 34;
   const boxBlockH = row1H + boxGap + row2H;
-  const gap =
-    (PB_H - 2 * lpnY - lpnBlockH - boxBlockH - eanBlockH) / 2;
-  const boxesY = lpnY + lpnBlockH + gap;
-  const eanY = boxesY + boxBlockH + gap;
+  const totalH = lpnBlockH + blockGap + boxBlockH + blockGap + eanBlockH;
+  const lpnY = (PB_H - totalH) / 2;
+  const boxesY = lpnY + lpnBlockH + blockGap;
+  const eanY = boxesY + boxBlockH + blockGap;
+
+  /** one font size for a whole table row: the largest that fits every cell */
+  const rowFontSize = (
+    doc: PDFKit.PDFDocument,
+    cells: Array<[number, number, string]>,
+    h: number,
+  ): number =>
+    Math.min(
+      ...cells.map(([w, , t]) => {
+        const lay = fitCellText(doc, t, w, h, LABEL_FONT_SIZE);
+        return lay ? lay.size : 6;
+      }),
+    );
+
   mixed.forEach((r, i) => {
     doc.addPage({ size: [PB_W, PB_H], margin: 0 });
     doc.lineWidth(1).rect(2, 3, PB_W - 4, PB_H - 9).stroke();
@@ -674,28 +687,29 @@ export async function buildPolybagLabelsPdf(rows: LabelRow[]): Promise<Buffer> {
       );
     }
 
-    tableCell(doc, m, boxesY, 122, row1H, `Order No: ${r.po}`);
-    tableCell(
-      doc,
-      m + 126,
-      boxesY,
-      bw - m - (m + 126),
-      row1H,
-      `LPN Carton No: ${lpns[i].slice(-7)}`,
-    );
+    const orderNo = `Order No: ${r.po}`;
+    const cartonNo = `LPN Carton No: ${lpns[i].slice(-7)}`;
+    const row1Font = rowFontSize(doc, [
+      [122, boxesY, orderNo],
+      [bw - m - (m + 126), boxesY, cartonNo],
+    ], row1H);
+    tableCell(doc, m, boxesY, 122, row1H, orderNo, row1Font);
+    tableCell(doc, m + 126, boxesY, bw - m - (m + 126), row1H, cartonNo, row1Font);
 
     const y2 = boxesY + row1H + boxGap;
-    tableCell(doc, m, y2, wA, row2H, `Article no: ${r.art}`);
-    tableCell(doc, m + wA, y2, wC, row2H, `Color no: ${r.col}`);
-    tableCell(doc, m + wA + wC, y2, wS, row2H, `Size: ${r.size}`);
-    tableCell(
-      doc,
-      m + wA + wC + wS,
-      y2,
-      bw - m - (m + wA + wC + wS),
-      row2H,
-      `QTY/pcs: ${r.qty}`,
-    );
+    const wQ = bw - m - (m + wA + wC + wS);
+    const cells2: Array<[number, number, string]> = [
+      [wA, y2, `Article no: ${r.art}`],
+      [wC, y2, `Color no: ${r.col}`],
+      [wS, y2, `Size: ${r.size}`],
+      [wQ, y2, `QTY/pcs: ${r.qty}`],
+    ];
+    const row2Font = rowFontSize(doc, cells2, row2H);
+    let cx = m;
+    for (const [w, , t] of cells2) {
+      tableCell(doc, cx, y2, w, row2H, t, row2Font);
+      cx += w;
+    }
 
     const eb = eanBars[i];
     if (eb) {
