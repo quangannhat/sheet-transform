@@ -322,12 +322,13 @@ export async function writeOutput(
   }
 
   const tc = totalCartons ?? records.length;
-  let lpn = BigInt(lpnStart);
+  const useLpn = lpnStart !== "";
+  let lpn = useLpn ? BigInt(lpnStart) : BigInt(0);
 
   for (const r of records) {
     const bc = getBarcode(barcodes, r.artBare, r.colRaw, r.size);
     const row = ws.addRow([
-      String(lpn),
+      useLpn ? String(lpn) : null,
       po,
       po,
       r.art,
@@ -344,7 +345,7 @@ export async function writeOutput(
       cell.alignment = center;
       cell.border = cellBorder;
     }
-    lpn += BigInt(1);
+    if (useLpn) lpn += BigInt(1);
   }
 
   const colWidths = [18, 12, 22, 14, 12, 8, 10, 22, 18, 14];

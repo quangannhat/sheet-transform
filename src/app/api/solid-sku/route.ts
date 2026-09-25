@@ -42,12 +42,11 @@ export async function POST(request: Request): Promise<Response> {
     errors.push("• Barcode file must be .xlsx or .xlsm");
   }
   let lpnStart = "";
-  if (!lpnRaw) {
-    errors.push("• LPN start number is required");
-  } else if (!/^-?\d+$/.test(lpnRaw)) {
+  if (lpnRaw && !/^-?\d+$/.test(lpnRaw)) {
     errors.push("• LPN start must be a number");
   } else {
-    // keep the raw digits: BigInt-safe sequencing in writeOutput
+    // keep the raw digits: BigInt-safe sequencing in writeOutput;
+    // empty means the workbook is generated without LPNs
     lpnStart = lpnRaw;
   }
   if (errors.length > 0) return badRequest(errors);

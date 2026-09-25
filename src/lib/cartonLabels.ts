@@ -20,15 +20,15 @@ export type LabelRow = {
   boxLabel: string;
 };
 
-export const DEFAULT_SERIAL_BASE = "12471600000049";
-
+/** Blank base = "no serials": solid stickers then print only the sheet LPN,
+ * and neither is drawn when the sheet has no LPNs either. */
 export function resolveSerialBase(raw: string): {
-  base: number;
+  base: number | null;
   valid: boolean;
 } {
   const trimmed = raw.trim();
-  if (!trimmed) return { base: Number(DEFAULT_SERIAL_BASE), valid: true };
-  if (!/^\d+$/.test(trimmed)) return { base: 0, valid: false };
+  if (!trimmed) return { base: null, valid: true };
+  if (!/^\d+$/.test(trimmed)) return { base: null, valid: false };
   return { base: Number(trimmed), valid: true };
 }
 
@@ -469,7 +469,7 @@ function drawMixedSticker(
 
 export async function buildLabelsPdf(
   rows: LabelRow[],
-  serialBase: number,
+  serialBase: number | null,
 ): Promise<Buffer> {
   const cartons = groupCartons(rows);
   const renderSerial = cachedRenderer("code128", 200, 18);
@@ -477,12 +477,14 @@ export async function buildLabelsPdf(
   const renderEan = cachedRenderer("ean13", 255, 15);
 
   // solid stickers carry the carton's own LPN from the workbook, so the
-  // barcode always equals the sheet; the serial base is only a fallback for
-  // legacy sheets whose LPN column is blank. Mixed cartons take no LPN sticker
+  // barcode always equals the sheet; the serial base only kicks in for sheets
+  // whose LPN column is blank. No LPN and no serial base => no top barcode.
+  // Mixed cartons take no LPN sticker at all.
   const serialTexts = cartons.map((g) => {
     if (g.mixed) return null;
     const lpn = g.rows[0].lpn.trim();
-    return lpn ? lpnDigits(lpn) : cartonSerial(serialBase, g.firstRowIndex);
+    if (lpn) return lpnDigits(lpn);
+    return serialBase === null ? null : cartonSerial(serialBase, g.firstRowIndex);
   });
 
   // pre-render everything so the doc build stays synchronous
@@ -538,45 +540,48 @@ export async function buildLabelsPdf(
       doc.image(sb.buffer, sx, 18, { width: sb.widthPt });
       barcodeCaption(doc, sb, sx, 18, serial, 13, 1.8);
     }
+    // with no top LPN/serial barcode the remaining boxes (span 119..403)
+    // shift up 53pt so they stay centered inside the frame
+    const dy = sb && serial !== null ? 0 : 53;
 
-    boxLabel(doc, 30, 119, 300, 53, [
+    boxLabel(doc, 30, 119 - dy, 300, 53, [
       { text: `Order no:${r.po}`, size: LABEL_FONT_SIZE },
     ]);
     const pb = pos[i];
     if (pb) {
-      doc.image(pb.buffer, 353, 112, { width: pb.widthPt });
-      barcodeCaption(doc, pb, 353, 112, r.po, 12, 0.8);
+      doc.image(pb.buffer, 353, 112 - dy, { width: pb.widthPt });
+      barcodeCaption(doc, pb, 353, 112 - dy, r.po, 12, 0.8);
     }
 
-    boxLabel(doc, 30, 211, 186, 66, [
+    boxLabel(doc, 30, 211 - dy, 186, 66, [
       { text: "Article no:", size: LABEL_FONT_SIZE },
       { text: r.art, size: LABEL_FONT_SIZE },
     ]);
-    boxLabel(doc, 224, 211, 129, 66, [
+    boxLabel(doc, 224, 211 - dy, 129, 66, [
       { text: "Color no:", size: LABEL_FONT_SIZE },
       { text: r.col, size: LABEL_FONT_SIZE },
     ]);
-    boxLabel(doc, 364, 211, 76, 66, [
+    boxLabel(doc, 364, 211 - dy, 76, 66, [
       { text: "Size:", size: LABEL_FONT_SIZE },
       { text: r.size, size: LABEL_FONT_SIZE },
     ]);
-    boxLabel(doc, 450, 211, 129, 66, [
+    boxLabel(doc, 450, 211 - dy, 129, 66, [
       { text: "QTY/pcs:", size: LABEL_FONT_SIZE },
       { text: r.qty, size: LABEL_FONT_SIZE },
     ]);
 
     const eb = eans[i];
     if (eb) {
-      doc.image(eb.buffer, 62, 300, { width: eb.widthPt });
+      doc.image(eb.buffer, 62, 300 - dy, { width: eb.widthPt });
       const eanDigits =
         r.ean.length === 14 && r.ean.startsWith("0")
           ? r.ean.slice(1)
           : r.ean;
-      barcodeCaption(doc, eb, 62, 300, eanDigits, 11, 1.8);
+      barcodeCaption(doc, eb, 62, 300 - dy, eanDigits, 11, 1.8);
     }
 
     // start 10pt below the QTY box's bottom border (277)
-    boxLabel(doc, 450, 287, 130, 116, [
+    boxLabel(doc, 450, 287 - dy, 130, 116, [
       { text: "CARTON BOX", size: 17 },
       { text: "NUMBER:", size: 17 },
       { text: r.boxLabel, size: 22 },
@@ -610,9 +615,11 @@ export async function buildPolybagLabelsPdf(rows: LabelRow[]): Promise<Buffer> {
   const renderLpn = cachedRenderer("code128", 200, 13);
   const renderEan = cachedRenderer("ean13", 190, 12);
 
-  const lpns = mixed.map((r) => lpnDigits(r.lpn));
+  const lpns = mixed.map((r) => (r.lpn.trim() ? lpnDigits(r.lpn) : ""));
   const lpnBars = await Promise.all(
-    mixed.map((_, i) => renderLpn(lpns[i])),
+    mixed.map((_, i) =>
+      lpns[i] ? renderLpn(lpns[i]) : Promise.resolve(null),
+    ),
   );
   const eanBars = await Promise.all(
     mixed.map((r) => (r.ean ? renderEan(r.ean) : Promise.resolve(null))),
@@ -651,9 +658,12 @@ export async function buildPolybagLabelsPdf(rows: LabelRow[]): Promise<Buffer> {
   const boxGap = 10;
   const blockGap = 34;
   const boxBlockH = row1H + boxGap + row2H;
-  const totalH = lpnBlockH + blockGap + boxBlockH + blockGap + eanBlockH;
+  // the LPN block (and its gap) only exists when the sheet carries LPNs
+  const hasLpn = lpns.some((l) => l !== "");
+  const totalH =
+    (hasLpn ? lpnBlockH + blockGap : 0) + boxBlockH + blockGap + eanBlockH;
   const lpnY = (PB_H - totalH) / 2;
-  const boxesY = lpnY + lpnBlockH + blockGap;
+  const boxesY = hasLpn ? lpnY + lpnBlockH + blockGap : lpnY;
   const eanY = boxesY + boxBlockH + blockGap;
 
   /** one font size for a whole table row: the largest that fits every cell */
@@ -690,13 +700,18 @@ export async function buildPolybagLabelsPdf(rows: LabelRow[]): Promise<Buffer> {
     }
 
     const orderNo = `Order No: ${r.po}`;
-    const cartonNo = `LPN Carton No: ${lpns[i].slice(-8).padStart(8, "0")}`;
-    const row1Font = rowFontSize(doc, [
-      [122, boxesY, orderNo],
-      [bw - m - (m + 126), boxesY, cartonNo],
-    ], row1H);
-    tableCell(doc, m, boxesY, 122, row1H, orderNo, row1Font);
-    tableCell(doc, m + 126, boxesY, bw - m - (m + 126), row1H, cartonNo, row1Font);
+    if (hasLpn) {
+      const cartonNo = `LPN Carton No: ${lpns[i].slice(-8).padStart(8, "0")}`;
+      const row1Font = rowFontSize(doc, [
+        [122, boxesY, orderNo],
+        [bw - m - (m + 126), boxesY, cartonNo],
+      ], row1H);
+      tableCell(doc, m, boxesY, 122, row1H, orderNo, row1Font);
+      tableCell(doc, m + 126, boxesY, bw - m - (m + 126), row1H, cartonNo, row1Font);
+    } else {
+      const row1Font = rowFontSize(doc, [[bw, boxesY, orderNo]], row1H);
+      tableCell(doc, m, boxesY, bw, row1H, orderNo, row1Font);
+    }
 
     const y2 = boxesY + row1H + boxGap;
     const wQ = bw - m - (m + wA + wC + wS);

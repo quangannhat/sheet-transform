@@ -202,13 +202,12 @@ export function SolidSkuGenerator() {
 
         <div className="flex flex-col gap-4 sm:flex-row">
           <label className={`flex-1 ${labelClass}`}>
-            LPN start number
+            LPN start number (optional &mdash; leave empty to skip LPNs)
             <input
               type="text"
               inputMode="numeric"
               name="lpn"
-              required
-              placeholder="1"
+              placeholder="124716000000100"
               className={inputClass}
             />
           </label>
