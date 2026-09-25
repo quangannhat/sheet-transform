@@ -476,12 +476,14 @@ export async function buildLabelsPdf(
   const renderPo = cachedRenderer("code128", 190, 16);
   const renderEan = cachedRenderer("ean13", 255, 15);
 
-  // serials follow the carton's first sheet row, so a solid carton's sticker
-  // serial always carries the same index as its LPN in the workbook; mixed
-  // cartons take no LPN sticker at all
-  const serialTexts = cartons.map((g) =>
-    g.mixed ? null : cartonSerial(serialBase, g.firstRowIndex),
-  );
+  // solid stickers carry the carton's own LPN from the workbook, so the
+  // barcode always equals the sheet; the serial base is only a fallback for
+  // legacy sheets whose LPN column is blank. Mixed cartons take no LPN sticker
+  const serialTexts = cartons.map((g) => {
+    if (g.mixed) return null;
+    const lpn = g.rows[0].lpn.trim();
+    return lpn ? lpnDigits(lpn) : cartonSerial(serialBase, g.firstRowIndex);
+  });
 
   // pre-render everything so the doc build stays synchronous
   const serials = await Promise.all(

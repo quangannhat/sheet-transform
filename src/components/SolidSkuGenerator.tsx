@@ -213,7 +213,7 @@ export function SolidSkuGenerator() {
             />
           </label>
           <label className={`flex-1 ${labelClass}`}>
-            Carton serial base (PDF barcodes)
+            Carton serial base (fallback: only used if the sheet&rsquo;s LPN column is empty)
             <input
               type="text"
               inputMode="numeric"
@@ -381,7 +381,7 @@ function SolidSkuPdfCard({
       </label>
       {withSerialBase && (
         <label className={`sm:max-w-xs ${labelClass}`}>
-          Carton serial base (optional)
+          Carton serial base (optional fallback for sheets without LPNs)
           <input
             type="text"
             inputMode="numeric"
