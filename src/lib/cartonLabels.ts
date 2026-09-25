@@ -549,8 +549,10 @@ export async function buildLabelsPdf(
     ]);
     const pb = pos[i];
     if (pb) {
-      doc.image(pb.buffer, 353, 112 - dy, { width: pb.widthPt });
-      barcodeCaption(doc, pb, 353, 112 - dy, r.po, 12, 0.8);
+      // center the bars+caption block against the Order no box (top 119-dy, h 53)
+      const poY = 119 - dy + (53 - (pb.heightPt + 1.5 + 12)) / 2;
+      doc.image(pb.buffer, 353, poY, { width: pb.widthPt });
+      barcodeCaption(doc, pb, 353, poY, r.po, 12, 0.8);
     }
 
     boxLabel(doc, 30, 211 - dy, 186, 66, [
@@ -714,7 +716,9 @@ export async function buildPolybagLabelsPdf(rows: LabelRow[]): Promise<Buffer> {
     }
 
     const y2 = boxesY + row1H + boxGap;
-    const wQ = bw - m - (m + wA + wC + wS);
+    // without an LPN row the Order No box spans the full width; stretch the
+    // cell row to match it (QTY absorbs the slack)
+    const wQ = hasLpn ? bw - m - (m + wA + wC + wS) : bw - wA - wC - wS;
     const cells2: Array<[number, number, string]> = [
       [wA, y2, `Article no: ${r.art}`],
       [wC, y2, `Color no: ${r.col}`],
