@@ -24,10 +24,10 @@ export function normHyphen(s: string): string {
   return s.replace(/[\u2010-\u2015\u2212\uff0d]/g, "-");
 }
 
-/** '543‐111 Dawn Blue‐Eggshell' → '543-111' */
+/** '543‐111 Dawn Blue‐Eggshell' → '543-111'; also splits on '/' (e.g. '543-111/EGGSHELL'). */
 export function colorCode(raw: Cell): string {
   if (raw === null || raw === "") return "";
-  return normHyphen(String(raw).trim()).split(/\s+/)[0] ?? "";
+  return normHyphen(String(raw).trim()).split(/[\s/]+/)[0] ?? "";
 }
 
 /** 81373 or 'F81373' or 'f81373' → 'F81373' */
@@ -149,7 +149,7 @@ function detectBarcodeColumns(
     const pick = (...names: string[]) => norm.findIndex((v) => names.includes(v));
     const barcode = pick("barcode");
     if (barcode === -1) continue;
-    const art = pick("art no:", "art no", "item number");
+    const art = pick("art no:", "art no", "item number", "style nr", "style");
     const color = pick("color id", "color", "colour");
     const size = pick("size", "sizes");
     if (art !== -1 && color !== -1 && size !== -1) return { art, color, size, barcode };
@@ -181,9 +181,7 @@ export async function buildBarcodeMap(
     const bc = asInt(bcRaw);
     if (bc === null) continue;
     const art = String(artRaw).trim().replace(/^[Ff]+/, "");
-    const col = colorRaw
-      ? normHyphen(String(colorRaw).split("/")[0].trim()).toUpperCase()
-      : "";
+    const col = colorCode(colorRaw).toUpperCase();
     const size = sizeRaw ? String(sizeRaw).trim().toUpperCase() : "";
     if (art && col && size) {
       barcodes.set(lookupKey(art, col, size), bc);
@@ -253,7 +251,7 @@ export async function parsePl(
 
     const art = artNo(style);
     const artBare = art.replace(/^F/, "");
-    const colStr = color ? String(color).trim().split(/\s+/)[0] : "";
+    const colStr = color ? colorCode(color) : "";
 
     for (let box = boxFromI; box <= boxTo; box += 1) {
       // A mixed carton becomes one row per polybag (article/size cell);
