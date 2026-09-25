@@ -688,7 +688,7 @@ export async function buildPolybagLabelsPdf(rows: LabelRow[]): Promise<Buffer> {
     }
 
     const orderNo = `Order No: ${r.po}`;
-    const cartonNo = `LPN Carton No: ${lpns[i].slice(-7)}`;
+    const cartonNo = `LPN Carton No: ${lpns[i].slice(-8).padStart(8, "0")}`;
     const row1Font = rowFontSize(doc, [
       [122, boxesY, orderNo],
       [bw - m - (m + 126), boxesY, cartonNo],
