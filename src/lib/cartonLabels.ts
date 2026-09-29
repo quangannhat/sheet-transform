@@ -337,7 +337,7 @@ function tableCell(
 const TABLE_FONT_SIZE = 14;
 
 /**
- * "Mixed SKU carton version 2" sticker: Order no + PO barcode + BOX CARTON
+ * "Mixed SKU carton version 2" sticker: Order no + PO barcode + CARTON BOX
  * NUMBER header, then one row per (article, color) and a fixed column per
  * size (XXS..XXXL, empty when absent) with polybag counts. Intentionally
  * carries no LPN (LPN goes on the polybags, i.e. the per-size rows of the
@@ -357,7 +357,7 @@ function drawMixedSticker(
     barcodeCaption(doc, poBarcode, 270, 34, r0.po, 12, 0.8);
   }
   boxLabel(doc, 464, 28, 107, 76, [
-    { text: "BOX CARTON", size: 14 },
+    { text: "CARTON BOX", size: 14 },
     { text: "NUMBER:", size: 14 },
     { text: r0.boxLabel, size: 22 },
   ]);
