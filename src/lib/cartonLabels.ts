@@ -404,7 +404,9 @@ function drawMixedSticker(
   // hand-written articles (per the manual's sticker photo)
   const MIN_DATA_ROWS = 3;
   const yTop = 116;
-  const yBot = PAGE_H - 16;
+  // Leave a little more breathing room below the mixed-carton table so its
+  // header and data rows are slightly shorter than the sticker height.
+  const yBot = PAGE_H - 40;
   const dataRows = Math.max(articles.length, MIN_DATA_ROWS);
   const unit = (yBot - yTop) / (1.35 + 0.65 + dataRows);
   const headH = 1.35 * unit;
@@ -706,10 +708,10 @@ export async function buildPolybagLabelsPdf(rows: LabelRow[]): Promise<Buffer> {
       const cartonNo = `LPN Carton No: ${lpns[i].slice(-8).padStart(8, "0")}`;
       const row1Font = rowFontSize(doc, [
         [122, boxesY, orderNo],
-        [bw - m - (m + 126), boxesY, cartonNo],
+        [bw - 126, boxesY, cartonNo],
       ], row1H);
       tableCell(doc, m, boxesY, 122, row1H, orderNo, row1Font);
-      tableCell(doc, m + 126, boxesY, bw - m - (m + 126), row1H, cartonNo, row1Font);
+      tableCell(doc, m + 126, boxesY, bw - 126, row1H, cartonNo, row1Font);
     } else {
       const row1Font = rowFontSize(doc, [[bw, boxesY, orderNo]], row1H);
       tableCell(doc, m, boxesY, bw, row1H, orderNo, row1Font);
@@ -718,7 +720,7 @@ export async function buildPolybagLabelsPdf(rows: LabelRow[]): Promise<Buffer> {
     const y2 = boxesY + row1H + boxGap;
     // without an LPN row the Order No box spans the full width; stretch the
     // cell row to match it (QTY absorbs the slack)
-    const wQ = hasLpn ? bw - m - (m + wA + wC + wS) : bw - wA - wC - wS;
+    const wQ = bw - wA - wC - wS;
     const cells2: Array<[number, number, string]> = [
       [wA, y2, `Article no: ${r.art}`],
       [wC, y2, `Color no: ${r.col}`],
