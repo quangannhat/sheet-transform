@@ -393,8 +393,8 @@ function drawMixedSticker(
   const articles = [...byArt.values()];
 
   const x0 = 24;
-  const wArt = 70;
-  const wCol = 76;
+  const wArt = 74;
+  const wCol = 80;
   const wPoly = 66;
   const wTot = 78;
   const wSize =
@@ -406,7 +406,7 @@ function drawMixedSticker(
   const yTop = 116;
   // Leave a little more breathing room below the mixed-carton table so its
   // header and data rows are slightly shorter than the sticker height.
-  const yBot = PAGE_H - 40;
+  const yBot = PAGE_H - 64;
   const dataRows = Math.max(articles.length, MIN_DATA_ROWS);
   const unit = (yBot - yTop) / (1.35 + 0.65 + dataRows);
   const headH = 1.35 * unit;
