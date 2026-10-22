@@ -243,6 +243,17 @@ function boxLabel(
   }
 }
 
+function articleBoxWidth(doc: PDFKit.PDFDocument, article: string): number {
+  const minWidth = 186;
+  const maxWidth = 225;
+  doc.font(LABEL_FONT).fontSize(LABEL_FONT_SIZE);
+  const required = Math.max(
+    doc.widthOfString("Article no:"),
+    doc.widthOfString(article),
+  ) + 12;
+  return Math.min(maxWidth, Math.max(minWidth, required));
+}
+
 /** A carton is one page; >1 rows (polybags) makes it a mixed carton. */
 type CartonGroup = {
   boxLabel: string;
@@ -547,7 +558,8 @@ export async function buildLabelsPdf(
     const dy = sb && serial !== null ? 0 : 53;
 
     boxLabel(doc, 30, 119 - dy, 300, 53, [
-      { text: `Order no:${r.po}`, size: LABEL_FONT_SIZE },
+      { text: "Order no:", size: LABEL_FONT_SIZE },
+      { text: r.po, size: LABEL_FONT_SIZE },
     ]);
     const pb = pos[i];
     if (pb) {
@@ -557,11 +569,14 @@ export async function buildLabelsPdf(
       barcodeCaption(doc, pb, 353, poY, r.po, 12, 0.8);
     }
 
-    boxLabel(doc, 30, 211 - dy, 186, 66, [
+    const articleW = articleBoxWidth(doc, r.art);
+    const colorX = 224 + articleW - 186;
+    const colorW = 353 - colorX;
+    boxLabel(doc, 30, 211 - dy, articleW, 66, [
       { text: "Article no:", size: LABEL_FONT_SIZE },
       { text: r.art, size: LABEL_FONT_SIZE },
     ]);
-    boxLabel(doc, 224, 211 - dy, 129, 66, [
+    boxLabel(doc, colorX, 211 - dy, colorW, 66, [
       { text: "Color no:", size: LABEL_FONT_SIZE },
       { text: r.col, size: LABEL_FONT_SIZE },
     ]);
