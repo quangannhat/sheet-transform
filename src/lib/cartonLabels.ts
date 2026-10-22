@@ -245,7 +245,9 @@ function boxLabel(
 
 function articleBoxWidth(doc: PDFKit.PDFDocument, article: string): number {
   const minWidth = 186;
-  const maxWidth = 225;
+  // Keep the adjacent Color box at 129pt so its heading stays on one line.
+  // Longer articles use fitCellText's font-size fallback after this limit.
+  const maxWidth = 198;
   doc.font(LABEL_FONT).fontSize(LABEL_FONT_SIZE);
   const required = Math.max(
     doc.widthOfString("Article no:"),
@@ -570,8 +572,12 @@ export async function buildLabelsPdf(
     }
 
     const articleW = articleBoxWidth(doc, r.art);
-    const colorX = 224 + articleW - 186;
-    const colorW = 353 - colorX;
+    const colorX = 30 + articleW + 8;
+    const colorW = 129;
+    const sizeX = colorX + colorW + 8;
+    const sizeW = 76;
+    const qtyX = sizeX + sizeW + 8;
+    const qtyW = 579 - qtyX;
     boxLabel(doc, 30, 211 - dy, articleW, 66, [
       { text: "Article no:", size: LABEL_FONT_SIZE },
       { text: r.art, size: LABEL_FONT_SIZE },
@@ -580,11 +586,11 @@ export async function buildLabelsPdf(
       { text: "Color no:", size: LABEL_FONT_SIZE },
       { text: r.col, size: LABEL_FONT_SIZE },
     ]);
-    boxLabel(doc, 364, 211 - dy, 76, 66, [
+    boxLabel(doc, sizeX, 211 - dy, sizeW, 66, [
       { text: "Size:", size: LABEL_FONT_SIZE },
       { text: r.size, size: LABEL_FONT_SIZE },
     ]);
-    boxLabel(doc, 450, 211 - dy, 129, 66, [
+    boxLabel(doc, qtyX, 211 - dy, qtyW, 66, [
       { text: "QTY/pcs:", size: LABEL_FONT_SIZE },
       { text: r.qty, size: LABEL_FONT_SIZE },
     ]);
