@@ -348,6 +348,7 @@ function tableCell(
 
 /** Base size for table cells that are not one of the Polybags columns. */
 const TABLE_FONT_SIZE = 14;
+const COMPACT_FIELD_FONT_SIZE = 24;
 
 /**
  * "Mixed SKU carton version 2" sticker: Order no + PO barcode + CARTON BOX
@@ -583,16 +584,16 @@ export async function buildLabelsPdf(
       { text: r.art, size: LABEL_FONT_SIZE },
     ]);
     boxLabel(doc, colorX, 211 - dy, colorW, 66, [
-      { text: "Color no:", size: LABEL_FONT_SIZE },
-      { text: r.col, size: LABEL_FONT_SIZE },
+      { text: "Color no:", size: COMPACT_FIELD_FONT_SIZE },
+      { text: r.col, size: COMPACT_FIELD_FONT_SIZE },
     ]);
     boxLabel(doc, sizeX, 211 - dy, sizeW, 66, [
       { text: "Size:", size: LABEL_FONT_SIZE },
       { text: r.size, size: LABEL_FONT_SIZE },
     ]);
     boxLabel(doc, qtyX, 211 - dy, qtyW, 66, [
-      { text: "QTY/pcs:", size: LABEL_FONT_SIZE },
-      { text: r.qty, size: LABEL_FONT_SIZE },
+      { text: "QTY/pcs:", size: COMPACT_FIELD_FONT_SIZE },
+      { text: r.qty, size: COMPACT_FIELD_FONT_SIZE },
     ]);
 
     const eb = eans[i];
