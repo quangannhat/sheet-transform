@@ -215,7 +215,66 @@ function wrapLines(
     }
     if (cur) out.push({ text: cur, size: l.size });
   }
+
   return out;
+}
+
+/** EAN-13 human-readable digits use one leading digit and two 6-digit groups. */
+function ean13Caption(
+  doc: PDFKit.PDFDocument,
+  rb: RenderedBarcode,
+  x: number,
+  y: number,
+  digits: string,
+  size: number,
+) {
+  if (!/^\d{13}$/.test(digits)) return;
+
+  const baseline = y + rb.heightPt + 1.5;
+  doc.font(ARIAL_REGULAR_FONT).fontSize(size).fillColor("#000000");
+  // EAN-13's first digit sits to the left of the bars; the remaining digits
+  // are grouped beneath the left and right halves, like standard retail labels.
+  doc.text(digits[0], x, baseline, {
+    width: rb.widthPt * 0.12,
+    align: "center",
+    lineBreak: false,
+  });
+  doc.text(digits.slice(1, 7), x + rb.widthPt * 0.17, baseline, {
+    width: rb.widthPt * 0.34,
+    align: "center",
+    characterSpacing: 1.8,
+    lineBreak: false,
+  });
+  doc.text(digits.slice(7), x + rb.widthPt * 0.53, baseline, {
+    width: rb.widthPt * 0.43,
+    align: "center",
+    characterSpacing: 1.8,
+    lineBreak: false,
+  });
+}
+
+/** Extend EAN-13 start, center, and end guard bars below the data bars. */
+function extendEan13Guards(
+  doc: PDFKit.PDFDocument,
+  rb: RenderedBarcode,
+  x: number,
+  y: number,
+) {
+  const moduleWidth = rb.widthPt / 95;
+  const guardBars = [0, 2, 46, 48, 92, 94];
+  const descent = moduleWidth * 5;
+  doc.save().fillColor("#000000");
+  for (const moduleIndex of guardBars) {
+    doc
+      .rect(
+        x + moduleIndex * moduleWidth,
+        y,
+        moduleWidth,
+        rb.heightPt + descent,
+      )
+      .fill();
+  }
+  doc.restore();
 }
 
 function boxLabel(
@@ -598,12 +657,15 @@ export async function buildLabelsPdf(
 
     const eb = eans[i];
     if (eb) {
-      doc.image(eb.buffer, 62, 300 - dy, { width: eb.widthPt });
+      const eanX = 62;
+      const eanY = 300 - dy;
+      doc.image(eb.buffer, eanX, eanY, { width: eb.widthPt });
+      extendEan13Guards(doc, eb, eanX, eanY);
       const eanDigits =
         r.ean.length === 14 && r.ean.startsWith("0")
           ? r.ean.slice(1)
           : r.ean;
-      barcodeCaption(doc, eb, 62, 300 - dy, eanDigits, 11, 1.8);
+      ean13Caption(doc, eb, 62, 300 - dy, eanDigits, 11);
     }
 
     // start 10pt below the QTY box's bottom border (277)
@@ -760,11 +822,12 @@ export async function buildPolybagLabelsPdf(rows: LabelRow[]): Promise<Buffer> {
     if (eb) {
       const ex = (PB_W - eb.widthPt) / 2;
       doc.image(eb.buffer, ex, eanY, { width: eb.widthPt });
+      extendEan13Guards(doc, eb, ex, eanY);
       const eanDigits =
         r.ean.length === 14 && r.ean.startsWith("0")
           ? r.ean.slice(1)
           : r.ean;
-      barcodeCaption(doc, eb, ex, eanY, eanDigits, 10, 1.8);
+      ean13Caption(doc, eb, ex, eanY, eanDigits, 10);
     }
   });
 
