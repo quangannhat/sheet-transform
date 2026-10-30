@@ -243,13 +243,13 @@ function ean13Caption(
   doc.text(digits.slice(1, 7), x + 3 * moduleWidth, baseline, {
     width: 42 * moduleWidth,
     align: "center",
-    characterSpacing: 1.8,
+    characterSpacing: 4,
     lineBreak: false,
   });
   doc.text(digits.slice(7), x + 50 * moduleWidth, baseline, {
     width: 42 * moduleWidth,
     align: "center",
-    characterSpacing: 1.8,
+    characterSpacing: 4,
     lineBreak: false,
   });
 }
@@ -666,7 +666,7 @@ export async function buildLabelsPdf(
         r.ean.length === 14 && r.ean.startsWith("0")
           ? r.ean.slice(1)
           : r.ean;
-      ean13Caption(doc, eb, 62, 300 - dy, eanDigits, 11);
+      ean13Caption(doc, eb, 62, 300 - dy, eanDigits, 14);
     }
 
     // start 10pt below the QTY box's bottom border (277)
@@ -828,7 +828,7 @@ export async function buildPolybagLabelsPdf(rows: LabelRow[]): Promise<Buffer> {
         r.ean.length === 14 && r.ean.startsWith("0")
           ? r.ean.slice(1)
           : r.ean;
-      ean13Caption(doc, eb, ex, eanY, eanDigits, 10);
+      ean13Caption(doc, eb, ex, eanY, eanDigits, 13);
     }
   });
 
