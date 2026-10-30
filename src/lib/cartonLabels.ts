@@ -231,22 +231,23 @@ function ean13Caption(
   if (!/^\d{13}$/.test(digits)) return;
 
   const baseline = y + rb.heightPt + 1.5;
+  const moduleWidth = rb.widthPt / 95;
   doc.font(ARIAL_REGULAR_FONT).fontSize(size).fillColor("#000000");
   // EAN-13's first digit sits to the left of the bars; the remaining digits
   // are grouped beneath the left and right halves, like standard retail labels.
-  doc.text(digits[0], x, baseline, {
-    width: rb.widthPt * 0.12,
+  doc.text(digits[0], x - 7 * moduleWidth, baseline, {
+    width: 6 * moduleWidth,
     align: "center",
     lineBreak: false,
   });
-  doc.text(digits.slice(1, 7), x + rb.widthPt * 0.17, baseline, {
-    width: rb.widthPt * 0.34,
+  doc.text(digits.slice(1, 7), x + 3 * moduleWidth, baseline, {
+    width: 42 * moduleWidth,
     align: "center",
     characterSpacing: 1.8,
     lineBreak: false,
   });
-  doc.text(digits.slice(7), x + rb.widthPt * 0.53, baseline, {
-    width: rb.widthPt * 0.43,
+  doc.text(digits.slice(7), x + 50 * moduleWidth, baseline, {
+    width: 42 * moduleWidth,
     align: "center",
     characterSpacing: 1.8,
     lineBreak: false,
@@ -262,7 +263,7 @@ function extendEan13Guards(
 ) {
   const moduleWidth = rb.widthPt / 95;
   const guardBars = [0, 2, 46, 48, 92, 94];
-  const descent = moduleWidth * 5;
+  const descent = moduleWidth * 8;
   doc.save().fillColor("#000000");
   for (const moduleIndex of guardBars) {
     doc
